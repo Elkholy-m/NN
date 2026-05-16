@@ -2,7 +2,7 @@ CC     := gcc
 OUTDIR := out
 CFLAGS := -Wextra -Wall
 LINKS  := -lm
-BINS   := simple_neoron gates xor
+BINS   := simple_neoron gates xor adder
 
 all: $(BINS)
 
