@@ -209,15 +209,11 @@ void nn_print(NN nn, const char* name) {
     char buff[256];
     printf("%s: [\n", name);
     for (size_t i = 0; i < nn.count; i++) {
-        snprintf(buff, sizeof(buff), "a%zu::[%zu][%zu]", i, nn.as[i].rows, nn.as[i].cols);
-        mat_print(nn.as[i], buff, 4);
-        snprintf(buff, sizeof(buff), "w%zu::[%zu][%zu]", i, nn.ws[i].rows, nn.ws[i].cols);
+        snprintf(buff, sizeof(buff), "w%zu::[%zu]x[%zu]", i, nn.ws[i].rows, nn.ws[i].cols);
         mat_print(nn.ws[i], buff, 4);
-        snprintf(buff, sizeof(buff), "b%zu::[%zu][%zu]", i, nn.bs[i].rows, nn.bs[i].cols);
+        snprintf(buff, sizeof(buff), "b%zu::[%zu]x[%zu]", i, nn.bs[i].rows, nn.bs[i].cols);
         mat_print(nn.bs[i], buff, 4);
     }
-    snprintf(buff, sizeof(buff), "a%zu::[%zu][%zu]", nn.count, NN_OUTPUT(nn).rows, NN_OUTPUT(nn).cols);
-    mat_print(nn.as[nn.count], buff, 4);
     printf("]\n");
 }
 
@@ -262,6 +258,8 @@ float nn_cost(NN nn, Mat ti, Mat to) {
 
 void nn_gredient(NN nn, NN g, Mat ti, Mat to, float eps) {
     NN_ASSERT(nn.count == g.count);
+    NN_ASSERT(ti.rows == to.rows);
+    NN_ASSERT(to.cols == NN_OUTPUT(nn).cols);
 
     float saved;
     float c = nn_cost(nn, ti, to);
