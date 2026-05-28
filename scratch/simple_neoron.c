@@ -21,20 +21,27 @@ const float train[][2] = {
 
 float cost(float weight);
 float rand_float();
+float gredient(float weight);
 
 int main() {
     srand(23);
     float weight = rand_float() * 10.f;
-    float eps  = 1e-3;
-    float rate = 1e-3;
+    float rate = 1e-2;
 
     printf("--------------------------\n");
     for (int i = 0; i < 1000; i++) {
+        float der ;
+#if 0
+        // GET TO ZERO AFTER 26 ROW
+        der = gredient(weight);
+#else
+        float eps  = 1e-3;
         float c = cost(weight);
-        float der = (cost(weight + eps) - c) / eps;
+        // GET TO ZERO AFTER 3 ROW
+        der = (cost(weight + eps) - c) / eps;
+#endif
         weight -= rate*der;
-        c = cost(weight);
-        printf("cost: %f\n", c);
+        printf("%i- cost = %f w = %f\n", i+1, cost(weight), weight);
     }
     printf("--------------------------\n");
     printf("the final weight value = %f\n", weight);
@@ -58,4 +65,16 @@ float cost(float weight) {
 
 float rand_float() {
     return ((float)rand() / RAND_MAX);
+}
+
+float gredient(float w) {
+    float g = 0;
+    size_t n = TRAIN_COUNT;
+    for (size_t i = 0; i < n; i++) {
+        float x = train[i][0];
+        float y = train[i][1];
+        g += 2 *(x*w - y)*x;
+    }
+
+    return g/n;
 }
