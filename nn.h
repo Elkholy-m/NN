@@ -312,7 +312,7 @@ void nn_backprop(NN nn, NN g, Mat ti, Mat to) {
         mat_copy(NN_INPUT(nn), mat_row(ti, i));
         nn_forward(nn);
 
-        for (size_t j = 0; j <= g.count; j++) {
+        for (size_t j = 0; j <= nn.count; j++) {
             mat_fill(g.as[j], 0);
         }
 
@@ -325,7 +325,7 @@ void nn_backprop(NN nn, NN g, Mat ti, Mat to) {
             for (size_t j = 0; j < nn.as[l].cols; j++) {
                 float a = MAT_AT(nn.as[l], 0, j);
                 float da = MAT_AT(g.as[l], 0, j);
-                MAT_AT(g.bs[l - 1], 0, j) += 2*da*a*(1 - a);
+                MAT_AT(g.bs[l-1], 0, j) += 2*da*a*(1 - a);
                 for (size_t k = 0; k < nn.as[l-1].cols; k++) {
                     float pa = MAT_AT(nn.as[l-1], 0, k);
                     float w  = MAT_AT(nn.ws[l-1], k, j);
@@ -336,16 +336,16 @@ void nn_backprop(NN nn, NN g, Mat ti, Mat to) {
         }
     }
 
-    for (size_t l = 0; l < nn.count; l++) {
-        for (size_t j = 0; j < g.ws[l].rows; j++) {
-            for (size_t k = 0; k < g.ws[l].rows; k++) {
-                MAT_AT(g.ws[l], j, k) /= n;
+    for (size_t i = 0; i < g.count; i++) {
+        for (size_t j = 0; j < g.ws[i].rows; j++) {
+            for (size_t k = 0; k < g.ws[i].cols; k++) {
+                MAT_AT(g.ws[i], j, k) /= n;
             }
         }
 
-        for (size_t j = 0; j < g.bs[l].rows; j++) {
-            for (size_t k = 0; k < g.bs[l].rows; k++) {
-                MAT_AT(g.bs[l], j, k) /= n;
+        for (size_t j = 0; j < g.bs[i].rows; j++) {
+            for (size_t k = 0; k < g.bs[i].cols; k++) {
+                MAT_AT(g.bs[i], j, k) /= n;
             }
         }
     }
