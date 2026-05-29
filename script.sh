@@ -2,4 +2,4 @@
 
 set -xe
 
-gcc -Wall -Wextra -o out/nn nn.c -lm
+gcc -Wall -Wextra -o out/adder_2 adder.c -lm
