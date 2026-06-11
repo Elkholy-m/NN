@@ -1,4 +1,6 @@
+#include <stdio.h>
 #include <time.h>
+#include <assert.h>
 
 #define NN_IMPLEMENTATION
 #include "nn.h"
@@ -61,85 +63,62 @@ void nn_render(Olivec_Canvas img, NN nn) {
     }
 }
 
-#define BITS 2
+float xor_td[] = {
+    0, 0, 0,
+    0, 1, 1,
+    1, 0, 1,
+    1, 1, 0,
+};
+
+Mat xor = { .rows = 4, .cols = 3, .stride = 3, .es = xor_td, };
+
+void xor_test(NN nn) {
+    for (size_t i = 0; i < 2; i++) {
+        for (size_t j = 0; j < 2; j++) {
+            MAT_AT(NN_INPUT(nn), 0, 0) = i;
+            MAT_AT(NN_INPUT(nn), 0, 1) = j;
+            nn_forward(nn);
+            float y =  MAT_AT(NN_OUTPUT(nn), 0, 0);
+            printf("%zu ^ %zu = %f\n", i, j, y);
+        }
+    }
+}
 
 int main() {
-    // PREPARE THE TRAINING SET FOR ADDER
-    int n = (1<<BITS);
-    int rows = n*n;
-    Mat ti = mat_alloc(rows, 2*BITS);
-    Mat to = mat_alloc(rows, BITS+1);
-    for (int i = 0; i < rows; i++) {
-        int x = i/n; 
-        int y = i%n; 
-        int z = x + y;
-        for (int j = 0; j < BITS; j++) {
-            MAT_AT(ti, i, j)      = (x>>(BITS-1-j)) & 1;
-            MAT_AT(ti, i, j+BITS) = (y>>(BITS-1-j)) & 1;
-            MAT_AT(to, i, j)      = (z>>(BITS-1-j)) & 1;
-        }
-        MAT_AT(to, i, BITS) = z >= n;
-    }
-
-    // MODEL LEARNING
-    srand(time(0));
-    float rate = 1;
-
-    size_t arch[] = {2*BITS, 4*BITS, BITS+1};
+    srand(23);
+    size_t arch[] = {2, 2, 1};
     NN nn = nn_alloc(arch, ARRAY_LEN(arch));
     NN g  = nn_alloc(arch, ARRAY_LEN(arch));
     nn_rand(nn, 0, 1);
 
-    // 1000 EPOCHS NOW IS ENOUGH
-    for (size_t i = 0; i < 3000; ++i) {
+    Mat m = xor;
+
+    Mat ti = mat_sub(m, COORDINATE(0, 0), COORDINATE(3, 1));
+    Mat to = mat_sub(m, COORDINATE(0, 2), COORDINATE(3, 2));
+
+    float rate = 1e-1;
+
+    for (int i = 0; i < 5000; i++) {
         nn_backprop(nn, g, ti, to);
         nn_learn(nn, g, rate);
-
         if (i%100 == 0) {
+            printf("Cost = %f\n", nn_cost(nn, ti, to));
             Olivec_Canvas img = olivec_canvas(pixels, IMG_WIDTH, IMG_HEIGHT, IMG_WIDTH);
             nn_render(img, nn);
 
             // save the nn image every 100 iteration
             char filename[265];
-            snprintf(filename, 265, "imgs/img_%04zu.png", i);
+            snprintf(filename, 265, "imgs/img_%04d.png", i);
             int res = stbi_write_png(filename, img.width, img.height, 4, pixels, img.stride*sizeof(uint32_t));
             if (!res) {
                 printf("ERROR: couldn't save file %s.\n", filename);
                 return 1;
             }
-            printf("COST = %f\n", nn_cost(nn, ti, to));
             printf("Save file successfully %s.\n", filename);
+
         }
     }
 
-    // TESTING MODEL
-    int fails = 0;
-    for (int x = 0; x < n; x++) {
-        for (int y = 0; y < n; y++) {
-            int z = x + y;
-            for (int j = 0; j < BITS; j++) {
-                MAT_AT(NN_INPUT(nn), 0, j)      = x>>(BITS-1-j) & 1;
-                MAT_AT(NN_INPUT(nn), 0, j+BITS) = y>>(BITS-1-j) & 1;
-            }
-            nn_forward(nn);
-
-            int a = 0;
-            for (int j = 0; j < BITS; j++) {
-                a |= (MAT_AT(NN_OUTPUT(nn), 0, j) >  0.5f)<<(BITS-1-j);
-            }
-            int c = MAT_AT(NN_OUTPUT(nn), 0, BITS)>0.5f;
-
-            // COMPARE THE MODEL FORWARDING WITH THE EXPECTED
-            int ea  = z&(n-1);
-            int ec = z >= n;
-            if (a != ea || ec != c) {
-                printf("%d + %d =  %d, c = %d\tExpected = %d, ec = %d\n"
-                       , x, y, a, c, ea, ec);
-                fails++;
-            }
-        }
-    }
-    if (fails == 0) printf("NICE MODEL :)\n");
-
-    return 0;
+    NN_PRINT(nn);
+    xor_test(nn);
 }

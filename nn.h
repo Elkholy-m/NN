@@ -59,7 +59,7 @@ typedef struct {
 
 NN nn_alloc(size_t* arch, size_t arch_count);
 void nn_print(NN nn, const char* name);
-void nn_rand(NN nn, size_t low, size_t high);
+void nn_rand(NN nn, float low, float high);
 void nn_forward(NN nn);
 float nn_cost(NN nn, Mat ti, Mat to);
 void nn_finite_diff(NN nn, NN g, Mat ti, Mat to, float eps);
@@ -154,7 +154,7 @@ void mat_copy(Mat dest, Mat src) {
 void mat_rand(Mat mat, float low, float high) {
     for (size_t i = 0; i < mat.rows; i++) {
         for (size_t j = 0; j < mat.cols; j++) {
-            MAT_AT(mat, i, j) = rand_float() * (high - low) + low;
+            MAT_AT(mat, i, j) = (rand_float() * (high - low)) + low;
         }
     }
 }
@@ -219,7 +219,7 @@ void nn_print(NN nn, const char* name) {
     printf("]\n");
 }
 
-void nn_rand(NN nn, size_t low, size_t high) {
+void nn_rand(NN nn, float low, float high) {
     for (size_t i = 0; i < nn.count; i++) {
         mat_rand(nn.ws[i], low, high);
         mat_rand(nn.bs[i], low, high);
