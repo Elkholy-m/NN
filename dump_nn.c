@@ -14,7 +14,8 @@
 
 uint32_t pixels[IMG_WIDTH*IMG_HEIGHT];
 
-void nn_render(Olivec_Canvas img, NN nn) {
+void nn_render(Olivec_Canvas img, NN nn)
+{
     uint32_t frame_thic = 10;
     uint32_t neuron_rad = 25;
 
