@@ -1,9 +1,10 @@
 #include <stdio.h>
 #include <time.h>
 #include "raylib.h"
-
 #define NN_IMPLEMENTATION
 #include "nn.h"
+
+
 #define IMG_FACTOR 80
 #define IMG_WIDTH  (16*IMG_FACTOR)
 #define IMG_HEIGHT (9*IMG_FACTOR)
@@ -37,17 +38,16 @@ void nn_render_raylib(NN nn) {
                     int cx2 = border_hpad + (i+1)*hpad + hpad/2;
                     int cy2 = border_vpad + k*vpad_2 + vpad_2/2;
                     
-                    low__color.a = floorf(255.f*sigmoidf(MAT_AT(nn.ws[i], j, k)));
-                    Color connection_color = ColorAlphaBlend(high_color, low__color, WHITE);
+                    high_color.a = floorf(255.f*sigmoidf(MAT_AT(nn.ws[i], j, k)));
+                    Color connection_color = ColorAlphaBlend(low__color, high_color, WHITE);
                     DrawLine(cx1, cy1, cx2, cy2, connection_color);
                 }
             }
             if (i == 0) {
-                Color input_color = {.a =0xFF, .b =0x80, .g =0x80, .r =0x80};
-                DrawCircle(cx1, cy1, neuron_raduis, input_color);
+                DrawCircle(cx1, cy1, neuron_raduis, GRAY);
             } else {
-                low__color.a = floorf(255.f*sigmoidf(MAT_AT(nn.bs[i-1], 0, j)));
-                Color neuron_color = ColorAlphaBlend(high_color, low__color, WHITE);
+                high_color.a = floorf(255.f*sigmoidf(MAT_AT(nn.bs[i-1], 0, j)));
+                Color neuron_color = ColorAlphaBlend(low__color, high_color, WHITE);
                 DrawCircle(cx1, cy1, neuron_raduis, neuron_color);
             }
         }

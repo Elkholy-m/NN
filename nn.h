@@ -7,6 +7,8 @@
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <string.h>
 #include <sys/param.h>
 
 #ifndef NN_ASSERT
@@ -36,6 +38,8 @@ typedef struct {
 } Mat;
 
 Mat mat_alloc(size_t rows, size_t cols);
+void mat_save(Mat mat, FILE* out);
+Mat mat_load(FILE* in);
 void mat_dot(Mat des, Mat a, Mat b);
 void mat_sum(Mat des, Mat a);
 Mat mat_row(Mat mat, size_t row);
@@ -87,6 +91,45 @@ Mat mat_alloc(size_t rows, size_t cols) {
 
     NN_ASSERT(m.es != NULL);
     return m;
+}
+
+void mat_save(Mat mat, FILE* out)
+{
+    const char* magic = "nn.h.mat";
+    fwrite(magic, strlen(magic), 1, out);
+    fwrite(&mat.rows, sizeof(mat.rows), 1, out);
+    fwrite(&mat.cols, sizeof(mat.cols), 1, out);
+
+    for (size_t i = 0; i < mat.rows; ++i) {
+        size_t n = fwrite(&MAT_AT(mat, i, 0), sizeof(*mat.es), mat.cols, out);
+        while (n < mat.cols && !ferror(out)) {
+            size_t k = fwrite(&MAT_AT(mat, i+n, 0), sizeof(*mat.es), mat.cols-n, out);
+            n += k;
+        }
+    }
+}
+
+Mat mat_load(FILE* in)
+{
+    uint64_t magic;
+    size_t rows, cols;
+
+    // THIS SHOULD WARN US IF THE SYSTEM IS LITTLE OR BIG ENDIAN
+    // THE (void)! JUST FOR SILENT COMPILER WARNING
+    (void)!fread(&magic , sizeof(magic), 1, in);
+    NN_ASSERT(magic == 0x74616d2e682e6e6e);
+
+    (void)!fread(&rows  , sizeof(rows) , 1, in);
+    (void)!fread(&cols  , sizeof(cols) , 1, in);
+
+    Mat mat = mat_alloc(rows, cols);
+    size_t n = fread(mat.es, sizeof(*mat.es), rows*cols, in);
+    while (n < rows*cols && !ferror(in)) {
+        size_t k = fread(mat.es+n, sizeof(*mat.es), rows*cols-n, in);
+        n += k;
+    }
+
+    return mat;
 }
 
 void mat_dot(Mat des, Mat a, Mat b) {
