@@ -1,10 +1,10 @@
 #include <stdio.h>
 #include <time.h>
-#include <ctype.h>
-#include <string.h>
 #include <float.h>
-#include <stdint.h>
-#include "raylib.h"
+#include <raylib.h>
+#include "stb_image.h"
+#include "stb_image_write.h"
+
 
 #define NN_IMPLEMENTATION
 #include "nn.h"
@@ -25,12 +25,6 @@
         }                                                                              \
         (da)->items[(da)->count++] = item;                                             \
     } while(0)
-
-typedef struct {
-    size_t* items;
-    size_t capacity;
-    size_t count;
-} Arch;
 
 typedef struct {
     float* items;
@@ -78,7 +72,6 @@ void nn_render(NN nn, int x, int y, int w, int h)
         }
     }
 }
-
 void get_cost_minmax(Costs costs, float* min, float* max)
 {
     // cheet idea the max always is the first cost
@@ -142,37 +135,6 @@ void cost_render(Costs costs, int x, int y, int w, int h)
     }
 }
 
-Arch get_arch_from_file(const char* arch_file_path)
-{
-    Arch arch = {0};
-    int file_len = 0;
-    unsigned char * buffer = LoadFileData(arch_file_path, &file_len);
-    if (buffer == NULL) {
-        fprintf(stderr, "Can't read file %s\n", arch_file_path);
-    }
-    // choping by delimeter `SPC` AND NEW-LINE
-    char delim[] = " \n";
-    char* token = strtok((char*)buffer, delim);
-
-    // get the integers
-    while (token != NULL) {
-            size_t tokenlen = strlen(token);
-            size_t i = 0;
-            uint32_t res = 0;
-            while (i < tokenlen && isdigit(token[i])) {
-                res = res*10 + token[i] - '0';
-                i++;
-            }
-
-            if (res > 0) {
-                DA_APPEND(&arch, res);
-            }
-        token = strtok(NULL, delim);
-    }
-    return arch;
-
-}
-
 char* shift_args(int* argc, char*** argv)
 {
     char* result = *argv[0];
@@ -183,74 +145,80 @@ char* shift_args(int* argc, char*** argv)
 
 int main(int argc, char** argv)
 {
-    // GETTING THE ARGS OF THE PROGRAM
     char* program = shift_args(&argc, &argv);
     if (argc <= 0) {
-        fprintf(stderr, "Missing arch file: Usage %s <arch-file> <data-file>", program);
+        fprintf(stderr, "Usage: %s <img-file-path>\n", program);
         return 1;
     }
-    char* arch_file_path = shift_args(&argc, &argv);
 
-    if (argc <= 0) {
-        fprintf(stderr, "Missing data file: Usage %s <arch-file> <data-file>", program);
+    char* img_file_path = shift_args(&argc, &argv);
+    int img_width, img_height, img_comp;
+    uint8_t* img_pixels = (uint8_t*)stbi_load(img_file_path, &img_width, &img_height, &img_comp, 0);
+    if (img_pixels == NULL) {
+        fprintf(stderr, "ERROR: Couldn't open file: %s\n", img_file_path);
         return 1;
     }
-    char* mat_file_path = shift_args(&argc, &argv);
 
-    // GETTING THE ARCH FROM arch_file_path
-    Arch arch = get_arch_from_file(arch_file_path);
-
-    // GETTING THE  MAT FROM mat_file_path
-    FILE* in = fopen(mat_file_path, "rb");
-    if (in == NULL) {
-        fprintf(stderr, "ERROR: Can't read file: %s", mat_file_path);
+    if (img_comp != 1) {
+        fprintf(stderr, "ERROR: The image is not grey scaled it has %d components\n", img_comp);
         return 1;
     }
-    Mat t = mat_load(in);
-    fclose(in);
-    NN_ASSERT(arch.count > 1);
-    NN_ASSERT((arch.items[0]+arch.items[arch.count-1]) == t.cols);
+
+    // INTIALIZING THE NURAL NETWORK
+    size_t arch[] = {2, 7, 4, 1};
+    size_t rows = img_width*img_height;
+    size_t cols = arch[0] + arch[ARRAY_LEN(arch)-1];
+    Mat t = mat_alloc(rows, cols);
+    for (int y = 0; y < img_height; y++) {
+        for (int x = 0; x < img_width; x++) {
+            int i = y*img_width+x;
+            MAT_AT(t, i, 0) = (float)x/(img_width-1);
+            MAT_AT(t, i, 1) = (float)y/(img_height-1);
+            MAT_AT(t, i, 2) = img_pixels[i]/255.f;
+        }
+    }
+
     Mat ti = {
-        .rows   = t.rows,
-        .cols   = arch.items[0],
+        .rows = t.rows,
+        .cols = arch[0],
         .stride = t.stride,
-        .es     = &MAT_AT(t, 0, 0),
+        .es = &MAT_AT(t, 0, 0),
     };
 
     Mat to = {
-        .rows   = t.rows,
-        .cols   = arch.items[arch.count-1],
+        .rows = t.rows,
+        .cols = arch[ARRAY_LEN(arch)-1],
         .stride = t.stride,
-        .es     = &MAT_AT(t, 0, arch.items[0]),
+        .es = &MAT_AT(t, 0, ti.cols),
     };
 
-
-    // MODEL LEARNING
-    NN nn = nn_alloc(arch.items, arch.count);
-    NN g  = nn_alloc(arch.items, arch.count);
-    nn_rand(nn, 0, 1);
-
-
+    NN nn = nn_alloc(arch, ARRAY_LEN(arch));
+    NN g  = nn_alloc(arch, ARRAY_LEN(arch));
+    nn_rand(nn, -1, 1);
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "GYM");
+    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "IMAGE-STORAGE");;
     SetTargetFPS(60);
 
     srand(time(0));
     float rate = 1;
     size_t epoch = 0;
-    size_t max_epoch = 5000;
-    size_t epochs_per_frame = 100;
+    size_t max_epoch = 100000;
+    size_t epochs_per_frame = 103;
     Costs costs = {0};
-
     bool paused = true;
+
+    Image img_prev  = GenImageColor(img_width, img_height, BLACK);
+    Texture2D training_prev  = LoadTextureFromImage(img_prev);
+    Texture2D original_prev = LoadTextureFromImage(img_prev);
     while (!WindowShouldClose()) {
         if(IsKeyPressed(KEY_R)) {
             paused = true;
             epoch = 0;
-            nn_rand(nn, 0, 1);
+            nn_rand(nn, -1, 1);
             costs.count = 0;
         }
+
         if (IsKeyPressed(KEY_SPACE)) paused = !paused;
         for (size_t j = 0; j < epochs_per_frame && epoch < max_epoch && !paused; j++) {
             nn_backprop(nn, g, ti, to);
@@ -268,14 +236,44 @@ int main(int argc, char** argv)
         int rw = GetRenderWidth();
         int rh = GetRenderHeight();
 
-        w = rw/2;
+        x = 0;
+        w = rw/3;
         h = rh*9/16;
-        x = rw-w;
         y = rh/2-h/2;
+
+        cost_render(costs, x, y, w, h);
+        
+        x += w;
         nn_render(nn, x, y, w, h);
 
-        x = 0;
-        cost_render(costs, x, y, w, h);
+        x += w;
+        float scale = h*13.f/WINDOW_HEIGHT;
+
+        for (int y = 0; y < img_height; ++y) {
+            for (int x =  0; x < img_width; ++x) {
+                MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(img_width-1);
+                MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(img_height-1);
+
+                nn_forward(nn);
+                uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255;
+                ImageDrawPixel(&img_prev, x, y, (Color) {pixel, pixel, pixel, 255});
+            }
+        }
+
+        Vector2 texture_position = (Vector2) {x+w/2-training_prev.width/2*scale, y+h/2-training_prev.height*scale};
+        UpdateTexture(training_prev, img_prev.data);
+        DrawTextureEx(training_prev, texture_position, 0, scale, WHITE);
+
+        for (int y = 0; y < img_height; ++y) {
+            for (int x =  0; x < img_width; ++x) {
+                uint8_t pixel = img_pixels[y*img_width+x];
+                ImageDrawPixel(&img_prev, x, y, (Color) {pixel, pixel, pixel, 255});
+            }
+        }
+
+        texture_position = (Vector2) {x+w/2-training_prev.width/2*scale, y+h/2};
+        DrawTextureEx(original_prev, texture_position, 0, scale, WHITE);
+        UpdateTexture(original_prev, img_prev.data);
 
 
         char buffer[256];
@@ -290,17 +288,33 @@ int main(int argc, char** argv)
         EndDrawing();
     }
 
-    // SAVING THE FINAL SNAPSHOT OF WINDOW TO THE SYSTEM AS PNG IMAGE
-    const char* img_file_name = "adder_nn.png";
-    Image final_img = LoadImageFromScreen();
+    char screenshot_file_path[256];
+    snprintf(screenshot_file_path, sizeof(screenshot_file_path),
+             "./nn_screen_shots/%s", img_file_path);
+    TakeScreenshot(screenshot_file_path);
+    CloseWindow();
+    
+    size_t out_width = 512;
+    size_t out_height = 512;
+    uint8_t *out_pixels = malloc(sizeof(*out_pixels)*out_width*out_height);
+    assert(out_pixels != NULL);
 
-    if(!ExportImage(final_img, img_file_name)) {
-        fprintf(stderr, "ERROR: Couldn't save %s to the system\n", img_file_name);
+    for (size_t y = 0; y < out_height; ++y) {
+        for (size_t x = 0; x < out_width; ++x) {
+            MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(out_width - 1);
+            MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(out_height - 1);
+            nn_forward(nn);
+            uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255.f;
+            out_pixels[y*out_width + x] = pixel;
+        }
+    }
+
+    const char *out_file_path = "upscaled.png";
+    if (!stbi_write_png(out_file_path, out_width, out_height, 1, out_pixels, out_width*sizeof(*out_pixels))) {
+        fprintf(stderr, "ERROR: could not save image %s\n", out_file_path);
         return 1;
     }
 
-    printf("Genereted image: %s\n", img_file_name);
-    CloseWindow();
-
+    printf("Generated %s from %s\n", out_file_path, img_file_path);
     return 0;
 }
