@@ -5,6 +5,8 @@
 #include "stb_image.h"
 #include "stb_image_write.h"
 
+/// TODO: implement SGD algorithm
+/// TODO: render the image based on the 3 input
 
 #define NN_IMPLEMENTATION
 #include "nn.h"
@@ -31,6 +33,18 @@ typedef struct {
     size_t capacity;
     size_t count;
 } Costs;
+
+const char* get_file_name(const char* file_path)
+{
+    // windows
+    const char* res = strrchr(file_path, '\\');
+    if (!res) {
+        // linux
+        res = strrchr(file_path, '/');
+    }
+
+    return res ? res+1 : file_path;
+}
 
 void nn_render(NN nn, int x, int y, int w, int h)
 {
@@ -165,7 +179,7 @@ int main(int argc, char** argv)
     }
 
     // INTIALIZING THE NURAL NETWORK
-    size_t arch[] = {2, 7, 4, 1};
+    size_t arch[] = {2, 7, 7, 1};
     size_t rows = img_width*img_height;
     size_t cols = arch[0] + arch[ARRAY_LEN(arch)-1];
     Mat t = mat_alloc(rows, cols);
@@ -178,19 +192,6 @@ int main(int argc, char** argv)
         }
     }
 
-    Mat ti = {
-        .rows = t.rows,
-        .cols = arch[0],
-        .stride = t.stride,
-        .es = &MAT_AT(t, 0, 0),
-    };
-
-    Mat to = {
-        .rows = t.rows,
-        .cols = arch[ARRAY_LEN(arch)-1],
-        .stride = t.stride,
-        .es = &MAT_AT(t, 0, ti.cols),
-    };
 
     NN nn = nn_alloc(arch, ARRAY_LEN(arch));
     NN g  = nn_alloc(arch, ARRAY_LEN(arch));
@@ -204,13 +205,19 @@ int main(int argc, char** argv)
     float rate = 1;
     size_t epoch = 0;
     size_t max_epoch = 100000;
-    size_t epochs_per_frame = 103;
     Costs costs = {0};
     bool paused = true;
+
+    size_t batch_size = 28;
+    size_t batch_count = (t.rows+batch_size-1)/batch_size;
+    size_t batch_per_frame = 103;
+    size_t batch_start = 0;
+    float cost = 0.f;
 
     Image img_prev  = GenImageColor(img_width, img_height, BLACK);
     Texture2D training_prev  = LoadTextureFromImage(img_prev);
     Texture2D original_prev = LoadTextureFromImage(img_prev);
+
     while (!WindowShouldClose()) {
         if(IsKeyPressed(KEY_R)) {
             paused = true;
@@ -220,11 +227,46 @@ int main(int argc, char** argv)
         }
 
         if (IsKeyPressed(KEY_SPACE)) paused = !paused;
-        for (size_t j = 0; j < epochs_per_frame && epoch < max_epoch && !paused; j++) {
-            nn_backprop(nn, g, ti, to);
+        for (size_t j = 0; j < batch_per_frame && epoch < max_epoch && !paused; j++) {
+            // DETECT THE FINAL BATCH
+            size_t size = batch_size;
+            if ((batch_start+batch_size) >= t.rows) size = t.rows - batch_start;
+
+            // CONSTRUCT TI, TO BASED ON THE BATCH
+            Mat batch_ti = {
+                .rows = size,
+                .cols = arch[0],
+                .stride = t.stride,
+                .es = &MAT_AT(t, batch_start, 0),
+            };
+
+            Mat batch_to = {
+                .rows = size,
+                .cols = arch[ARRAY_LEN(arch)-1],
+                .stride = t.stride,
+                .es = &MAT_AT(t, batch_start, batch_ti.cols),
+            };
+
+
+            if (epoch == 0 && batch_start == 0) {
+                DA_APPEND(&costs, nn_cost(nn, batch_ti, batch_to));
+            }
+
+            // LEARNING USING STOCHASTIC GREDIENT DESCENT
+            nn_backprop(nn, g, batch_ti, batch_to);
             nn_learn(nn, g, rate);
-            DA_APPEND(&costs, nn_cost(nn, ti, to));
-            epoch++;
+            cost += nn_cost(nn, batch_ti, batch_to);
+
+            batch_start += batch_size;
+
+            if ((batch_start) >= t.rows) {
+                mat_shuffle(t);
+                DA_APPEND(&costs, cost/batch_count);
+                epoch++;
+                // reseting the variables
+                cost = 0.f;
+                batch_start = 0;
+            }
         }    
         
 
@@ -279,7 +321,7 @@ int main(int argc, char** argv)
         char buffer[256];
         snprintf(buffer, sizeof(buffer),
                  "Epoch: %zu/%zu\t\tRate: %.2f\t\tCost: %f",
-                 epoch, max_epoch, rate, nn_cost(nn, ti, to));
+                 epoch, max_epoch, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
         
         float font_size = h*(50.0f/WINDOW_HEIGHT);
         int tw =  MeasureText(buffer, font_size);
@@ -288,10 +330,10 @@ int main(int argc, char** argv)
         EndDrawing();
     }
 
-    char screenshot_file_path[256];
-    snprintf(screenshot_file_path, sizeof(screenshot_file_path),
-             "./nn_screen_shots/%s", img_file_path);
-    TakeScreenshot(screenshot_file_path);
+    char snapshot_file_path[256];
+    snprintf(snapshot_file_path, sizeof(snapshot_file_path),
+             "./nn_screen_shots/%s", get_file_name(img_file_path));
+    TakeScreenshot(snapshot_file_path);
     CloseWindow();
     
     size_t out_width = 512;

@@ -38,6 +38,7 @@ typedef struct {
 } Mat;
 
 Mat mat_alloc(size_t rows, size_t cols);
+void mat_shuffle(Mat mat);
 void mat_save(Mat mat, FILE* out);
 Mat mat_load(FILE* in);
 void mat_dot(Mat des, Mat a, Mat b);
@@ -91,6 +92,21 @@ Mat mat_alloc(size_t rows, size_t cols) {
 
     NN_ASSERT(m.es != NULL);
     return m;
+}
+
+void mat_shuffle(Mat mat)
+{
+    for (size_t i = 0; i < mat.rows; i++) {
+        size_t swapidx = i + rand() % (mat.rows - i);
+        if (i != swapidx) {
+            for (size_t j = 0; j < mat.cols; j++) {
+                float tmp = MAT_AT(mat, i, j);
+                MAT_AT(mat, i, j) = MAT_AT(mat, swapidx, j);
+                MAT_AT(mat, swapidx, j) = tmp;
+            }    
+        }
+        
+    }
 }
 
 void mat_save(Mat mat, FILE* out)
