@@ -5,7 +5,6 @@
 #include "stb_image.h"
 #include "stb_image_write.h"
 
-/// TODO: implement SGD algorithm
 /// TODO: render the image based on the 3 input
 
 #define NN_IMPLEMENTATION
@@ -161,37 +160,68 @@ int main(int argc, char** argv)
 {
     char* program = shift_args(&argc, &argv);
     if (argc <= 0) {
-        fprintf(stderr, "Usage: %s <img-file-path>\n", program);
+        fprintf(stderr, "Usage: %s <image_1> <image_2>\n", program);
         return 1;
     }
 
-    char* img_file_path = shift_args(&argc, &argv);
-    int img_width, img_height, img_comp;
-    uint8_t* img_pixels = (uint8_t*)stbi_load(img_file_path, &img_width, &img_height, &img_comp, 0);
-    if (img_pixels == NULL) {
-        fprintf(stderr, "ERROR: Couldn't open file: %s\n", img_file_path);
+    char* img_file_path1 = shift_args(&argc, &argv);
+    if (argc <= 0) {
+        fprintf(stderr, "Usage: %s <image_1> <image_2>\n", program);
         return 1;
     }
 
-    if (img_comp != 1) {
-        fprintf(stderr, "ERROR: The image is not grey scaled it has %d components\n", img_comp);
+    int img_width1, img_height1, img_comp1;
+    uint8_t* img_pixels1 = (uint8_t*)stbi_load(img_file_path1, &img_width1, &img_height1, &img_comp1, 0);
+    if (img_pixels1 == NULL) {
+        fprintf(stderr, "ERROR: Couldn't open file: %s\n", img_file_path1);
+        return 1;
+    }
+
+    if (img_comp1 != 1) {
+        fprintf(stderr, "ERROR: The image is not grey scaled it has %d components\n", img_comp1);
+        return 1;
+    }
+
+    char* img_file_path2 = shift_args(&argc, &argv);
+    int img_width2, img_height2, img_comp2;
+    uint8_t* img_pixels2 = (uint8_t*)stbi_load(img_file_path2, &img_width2, &img_height2, &img_comp2, 0);
+    if (img_pixels2 == NULL) {
+        fprintf(stderr, "ERROR: Couldn't open file: %s\n", img_file_path2);
+        return 1;
+    }
+
+    if (img_comp2 != 1) {
+        fprintf(stderr, "ERROR: The image is not grey scaled it has %d components\n", img_comp2);
         return 1;
     }
 
     // INTIALIZING THE NURAL NETWORK
-    size_t arch[] = {2, 7, 7, 1};
-    size_t rows = img_width*img_height;
+    size_t arch[] = {3, 10, 10, 1};
+    size_t rows = img_width1*img_height1 + img_height2*img_width2;
     size_t cols = arch[0] + arch[ARRAY_LEN(arch)-1];
     Mat t = mat_alloc(rows, cols);
-    for (int y = 0; y < img_height; y++) {
-        for (int x = 0; x < img_width; x++) {
-            int i = y*img_width+x;
-            MAT_AT(t, i, 0) = (float)x/(img_width-1);
-            MAT_AT(t, i, 1) = (float)y/(img_height-1);
-            MAT_AT(t, i, 2) = img_pixels[i]/255.f;
+    for (int y = 0; y < img_height1; y++) {
+        for (int x = 0; x < img_width1; x++) {
+            int i = y*img_width1+x;
+            MAT_AT(t, i, 0) = (float)x/(img_width1-1);
+            MAT_AT(t, i, 1) = (float)y/(img_height1-1);
+            MAT_AT(t, i, 2) = 0.0f;
+            MAT_AT(t, i, 3) = img_pixels1[i]/255.f;
         }
     }
 
+    for (int y = 0; y < img_height2; y++) {
+        for (int x = 0; x < img_width2; x++) {
+            // THE INPUT HERE IS SHIFTED BY THE DIMENTION OF IMAGE 1
+            int i = img_width1*img_height1+y*img_width2+x;
+            MAT_AT(t, i, 0) = (float)x/(img_width2-1);
+            MAT_AT(t, i, 1) = (float)y/(img_height2-1);
+            MAT_AT(t, i, 2) = 1.0f;
+
+            // HERE IS THE BUG THAT ALSO ALEXI AND ME FACE 
+            MAT_AT(t, i, 3) = img_pixels2[y*img_width2+x]/255.f;
+        }
+    }
 
     NN nn = nn_alloc(arch, ARRAY_LEN(arch));
     NN g  = nn_alloc(arch, ARRAY_LEN(arch));
@@ -214,9 +244,31 @@ int main(int argc, char** argv)
     size_t batch_start = 0;
     float cost = 0.f;
 
-    Image img_prev  = GenImageColor(img_width, img_height, BLACK);
-    Texture2D training_prev  = LoadTextureFromImage(img_prev);
-    Texture2D original_prev = LoadTextureFromImage(img_prev);
+    Image img_prev1 = GenImageColor(img_width1, img_height1, BLACK);
+    Texture2D training_prev1  = LoadTextureFromImage(img_prev1);
+
+    Image img_prev2 = GenImageColor(img_width2, img_height2, BLACK);
+    Texture2D training_prev2  = LoadTextureFromImage(img_prev2);
+
+
+    /* DRAWING THE DOWN LEFT TEXTURE (ORIGINAL OF FIRST IMAGE) */
+    for (int y = 0; y < img_height1; ++y) {
+        for (int x =  0; x < img_width1; ++x) {
+            uint8_t pixel = img_pixels1[y*img_width1+x];
+            ImageDrawPixel(&img_prev1, x, y, (Color) {pixel, pixel, pixel, 255});
+        }
+    }
+    Texture2D original_prev1 = LoadTextureFromImage(img_prev1);
+
+    // DRAWING THE DOWN RIGHT TEXTURE (ORIGINAL OF SECOND IMAGE)
+    for (int y = 0; y < img_height2; ++y) {
+        for (int x =  0; x < img_width2; ++x) {
+            uint8_t pixel = img_pixels2[y*img_width2+x];
+            ImageDrawPixel(&img_prev2, x, y, (Color) {pixel, pixel, pixel, 255});
+        }
+    }
+    Texture2D original_prev2 = LoadTextureFromImage(img_prev2);
+
 
     while (!WindowShouldClose()) {
         if(IsKeyPressed(KEY_R)) {
@@ -247,11 +299,6 @@ int main(int argc, char** argv)
                 .es = &MAT_AT(t, batch_start, batch_ti.cols),
             };
 
-
-            if (epoch == 0 && batch_start == 0) {
-                DA_APPEND(&costs, nn_cost(nn, batch_ti, batch_to));
-            }
-
             // LEARNING USING STOCHASTIC GREDIENT DESCENT
             nn_backprop(nn, g, batch_ti, batch_to);
             nn_learn(nn, g, rate);
@@ -263,7 +310,7 @@ int main(int argc, char** argv)
                 mat_shuffle(t);
                 DA_APPEND(&costs, cost/batch_count);
                 epoch++;
-                // reseting the variables
+                // RESETING THE VARIABLES
                 cost = 0.f;
                 batch_start = 0;
             }
@@ -289,34 +336,48 @@ int main(int argc, char** argv)
         nn_render(nn, x, y, w, h);
 
         x += w;
-        float scale = h*13.f/WINDOW_HEIGHT;
+        float scale = h*10.f/WINDOW_HEIGHT;
 
-        for (int y = 0; y < img_height; ++y) {
-            for (int x =  0; x < img_width; ++x) {
-                MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(img_width-1);
-                MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(img_height-1);
+        // DRAWING THE UP LEFT TEXTURE (TRAINING OF FIRST IMAGE)
+        for (int y = 0; y < img_height1; ++y) {
+            for (int x =  0; x < img_width1; ++x) {
+                MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(img_width1-1);
+                MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(img_height1-1);
+                MAT_AT(NN_INPUT(nn), 0, 2) = 0.0f;
+
+                // TODO: CAN I DRAW ALL OF THAT WITH JUST ONE IMAGE PREVIEW I THINK I CAN
+                nn_forward(nn);
+                uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255;
+                ImageDrawPixel(&img_prev1, x, y, (Color) {pixel, pixel, pixel, 255});
+            }
+        }
+
+        Vector2 texture_position = (Vector2) {x+w/2-training_prev1.width*scale, y+h/2-training_prev1.height*scale};
+        UpdateTexture(training_prev1, img_prev1.data);
+        DrawTextureEx(training_prev1, texture_position, 0, scale, WHITE);
+
+        texture_position = (Vector2) {x+w/2-training_prev1.width*scale, y+h/2};
+        DrawTextureEx(original_prev1, texture_position, 0, scale, WHITE);
+
+        // DRAWING THE UP RIGHT TEXTURE (TRAINING OF SECOND IMAGE)
+        for (int y = 0; y < img_height2; ++y) {
+            for (int x =  0; x < img_width2; ++x) {
+                MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(img_width2-1);
+                MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(img_height2-1);
+                MAT_AT(NN_INPUT(nn), 0, 2) = 1.0f;
 
                 nn_forward(nn);
                 uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255;
-                ImageDrawPixel(&img_prev, x, y, (Color) {pixel, pixel, pixel, 255});
+                ImageDrawPixel(&img_prev2, x, y, (Color) {pixel, pixel, pixel, 255});
             }
         }
 
-        Vector2 texture_position = (Vector2) {x+w/2-training_prev.width/2*scale, y+h/2-training_prev.height*scale};
-        UpdateTexture(training_prev, img_prev.data);
-        DrawTextureEx(training_prev, texture_position, 0, scale, WHITE);
+        texture_position = (Vector2) {x+w/2, y+h/2-training_prev2.height*scale};
+        UpdateTexture(training_prev2, img_prev2.data);
+        DrawTextureEx(training_prev2, texture_position, 0, scale, WHITE);
 
-        for (int y = 0; y < img_height; ++y) {
-            for (int x =  0; x < img_width; ++x) {
-                uint8_t pixel = img_pixels[y*img_width+x];
-                ImageDrawPixel(&img_prev, x, y, (Color) {pixel, pixel, pixel, 255});
-            }
-        }
-
-        texture_position = (Vector2) {x+w/2-training_prev.width/2*scale, y+h/2};
-        DrawTextureEx(original_prev, texture_position, 0, scale, WHITE);
-        UpdateTexture(original_prev, img_prev.data);
-
+        texture_position = (Vector2) {x+w/2, y+h/2};
+        DrawTextureEx(original_prev2, texture_position, 0, scale, WHITE);
 
         char buffer[256];
         snprintf(buffer, sizeof(buffer),
@@ -332,11 +393,11 @@ int main(int argc, char** argv)
 
     char snapshot_file_path[256];
     snprintf(snapshot_file_path, sizeof(snapshot_file_path),
-             "./nn_screen_shots/%s", get_file_name(img_file_path));
+             "./nn_screen_shots/%s", get_file_name(img_file_path1));
     TakeScreenshot(snapshot_file_path);
     CloseWindow();
     
-    size_t out_width = 512;
+    size_t out_width  = 512;
     size_t out_height = 512;
     uint8_t *out_pixels = malloc(sizeof(*out_pixels)*out_width*out_height);
     assert(out_pixels != NULL);
@@ -345,18 +406,61 @@ int main(int argc, char** argv)
         for (size_t x = 0; x < out_width; ++x) {
             MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(out_width - 1);
             MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(out_height - 1);
+            MAT_AT(NN_INPUT(nn), 0, 2) = 0.0f;
+
             nn_forward(nn);
             uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255.f;
             out_pixels[y*out_width + x] = pixel;
         }
     }
 
-    const char *out_file_path = "upscaled.png";
+    char out_file_path[256];
+    snprintf(out_file_path, sizeof(out_file_path),
+             "upscaled/%s", get_file_name(img_file_path1));
     if (!stbi_write_png(out_file_path, out_width, out_height, 1, out_pixels, out_width*sizeof(*out_pixels))) {
         fprintf(stderr, "ERROR: could not save image %s\n", out_file_path);
         return 1;
     }
+    printf("Generated %s from %s\n", out_file_path, img_file_path1);
 
-    printf("Generated %s from %s\n", out_file_path, img_file_path);
+    snprintf(out_file_path, sizeof(out_file_path),
+             "upscaled/%s", get_file_name(img_file_path2));
+    for (size_t y = 0; y < out_height; ++y) {
+        for (size_t x = 0; x < out_width; ++x) {
+            MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(out_width - 1);
+            MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(out_height - 1);
+            MAT_AT(NN_INPUT(nn), 0, 2) = 1.0f;
+
+            nn_forward(nn);
+            uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255.f;
+            out_pixels[y*out_width + x] = pixel;
+        }
+    }
+    if (!stbi_write_png(out_file_path, out_width, out_height, 1, out_pixels, out_width*sizeof(*out_pixels))) {
+        fprintf(stderr, "ERROR: could not save image %s\n", out_file_path);
+        return 1;
+    }
+    printf("Generated %s from %s\n", out_file_path, img_file_path2);
+
+
+    snprintf(out_file_path, sizeof(out_file_path),
+             "upscaled/something_between.png");
+    for (size_t y = 0; y < out_height; ++y) {
+        for (size_t x = 0; x < out_width; ++x) {
+            MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(out_width - 1);
+            MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(out_height - 1);
+            MAT_AT(NN_INPUT(nn), 0, 2) = 0.5f;
+
+            nn_forward(nn);
+            uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255.f;
+            out_pixels[y*out_width + x] = pixel;
+        }
+    }
+    if (!stbi_write_png(out_file_path, out_width, out_height, 1, out_pixels, out_width*sizeof(*out_pixels))) {
+        fprintf(stderr, "ERROR: could not save image %s\n", out_file_path);
+        return 1;
+    }
+    printf("Generated %s from nothing\n", out_file_path);
+
     return 0;
 }
