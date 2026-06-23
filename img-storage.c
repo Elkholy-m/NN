@@ -2,10 +2,9 @@
 #include <time.h>
 #include <float.h>
 #include <raylib.h>
+#include <raymath.h>
 #include "stb_image.h"
 #include "stb_image_write.h"
-
-/// TODO: render the image based on the 3 input
 
 #define NN_IMPLEMENTATION
 #include "nn.h"
@@ -48,8 +47,8 @@ const char* get_file_name(const char* file_path)
 void nn_render(NN nn, int x, int y, int w, int h)
 {
     unsigned int neuron_raduis = h*((float)25/WINDOW_HEIGHT);
-    Color low__color       = {.a =0xFF, .b =0xFF, .g =0x00, .r =0xFF};
-    Color high_color       = {.a =0xFF, .b =0x00, .g =0xFF, .r =0x00};
+    Color low__color       = MAROON;   //{.a =0xFF, .b =0xFF, .g =0x00, .r =0xFF};
+    Color high_color       = DARKGREEN;//{.a =0xFF, .b =0x00, .g =0xFF, .r =0x00};
 
     size_t nn_x = w - 2*BORDER_HPAD;
     size_t nn_y = h - 2*BORDER_VPAD;
@@ -70,7 +69,7 @@ void nn_render(NN nn, int x, int y, int w, int h)
                     
                     float alpha = sigmoidf(MAT_AT(nn.ws[i], j, k));;
                     float thick = h*(3.0f/WINDOW_HEIGHT);
-                    Color connection_color = ColorAlphaBlend(low__color, high_color, WHITE);
+                    Color connection_color = ColorAlphaBlend(low__color, high_color, RAYWHITE);
                     high_color.a = floorf(255.f*alpha);
                     DrawLineEx((Vector2){cx1, cy1}, (Vector2){cx2, cy2}, thick, connection_color);
                 }
@@ -79,22 +78,10 @@ void nn_render(NN nn, int x, int y, int w, int h)
                 DrawCircle(cx1, cy1, neuron_raduis, GRAY);
             } else {
                 high_color.a = floorf(255.f*sigmoidf(MAT_AT(nn.bs[i-1], 0, j)));
-                Color neuron_color = ColorAlphaBlend(low__color, high_color, WHITE);
+                Color neuron_color = ColorAlphaBlend(low__color, high_color, RAYWHITE);
                 DrawCircle(cx1, cy1, neuron_raduis, neuron_color);
             }
         }
-    }
-}
-void get_cost_minmax(Costs costs, float* min, float* max)
-{
-    // cheet idea the max always is the first cost
-    // cheet idea the min always is the last cost
-    *min = FLT_MAX;
-    *max = FLT_MIN;
-
-    for (size_t i = 0; i < costs.count; i++) {
-        if (costs.items[i] < *min) *min = costs.items[i];
-        if (costs.items[i] > *max) *max = costs.items[i];
     }
 }
 
@@ -105,18 +92,21 @@ void cost_render(Costs costs, int x, int y, int w, int h)
 
     snprintf(buffer, sizeof(buffer), "COST-FUNCTION");
     int tw =  MeasureText(buffer, font_size);
-    DrawText(buffer, x+(w/2-tw/2), y+h, font_size, WHITE);
+    DrawText(buffer, x+(w/2-tw/2), y+h, font_size, RAYWHITE);
 
     w -= BORDER_HPAD;
     h -= BORDER_VPAD;
 
-    float min, max;
-    get_cost_minmax(costs, &min, &max);
-    size_t n = costs.count;
+    float min = FLT_MAX, max = FLT_MIN;
+
+    for (size_t i = 0; i < costs.count; i++) {
+        if (costs.items[i] < min) min = costs.items[i];
+        if (costs.items[i] > max) max = costs.items[i];
+    }
 
     if (min > 0) min = 0;
-    /* TODO: MAKE THE PLOT MORE STABLE BUT THERE IS STILL A BUG */
-    /* if (n < 1000) n = 1000; */
+    size_t n = costs.count;
+    if (n < 1000) n = 1000;
 
     // DRAW THE AXIS LINES
     int thick = h*(5.0f/WINDOW_HEIGHT);
@@ -124,19 +114,19 @@ void cost_render(Costs costs, int x, int y, int w, int h)
     int ly = y+BORDER_HPAD/2-thick;
     float tri_val = (h*10.f/WINDOW_HEIGHT);
 
-    // X-AXIS
-    DrawLineEx((Vector2) {lx, ly+h}, (Vector2) {lx+w, ly+h}, thick, WHITE);
-    DrawTriangle((Vector2) {lx+w, ly+h-tri_val}, (Vector2) {lx+w, ly+h+tri_val}, (Vector2) {lx+w+tri_val, ly+h}, WHITE);
+    // X-AXIS 
+    DrawLineEx((Vector2) {lx, ly+h}, (Vector2) {lx+w, ly+h}, thick, RAYWHITE);
+    DrawTriangle((Vector2) {lx+w, ly+h-tri_val}, (Vector2) {lx+w, ly+h+tri_val}, (Vector2) {lx+w+tri_val, ly+h}, RAYWHITE);
 
     // Y-AXIS
-    DrawLineEx((Vector2) {lx, ly}, (Vector2) {lx, ly+h}, thick, WHITE);
-    DrawTriangle((Vector2) {lx-tri_val, ly}, (Vector2) {lx+tri_val, ly}, (Vector2) {lx, ly-tri_val}, WHITE);
+    DrawLineEx((Vector2) {lx, ly}, (Vector2) {lx, ly+h}, thick, RAYWHITE);
+    DrawTriangle((Vector2) {lx-tri_val, ly}, (Vector2) {lx+tri_val, ly}, (Vector2) {lx, ly-tri_val}, RAYWHITE);
 
     snprintf(buffer, sizeof(buffer), "0");
-    DrawText(buffer, lx+5, ly+h+5, font_size, WHITE);
+    DrawText(buffer, lx+5, ly+h+5, font_size, RAYWHITE);
 
 
-    for (size_t i = 0; (i+1) < n; i++) {
+    for (size_t i = 0; (i+1) < costs.count; i++) {
         int x1 = x + BORDER_HPAD/2 + (float)w/n*i;
         int y1 = y + BORDER_VPAD/2 + (1 - (costs.items[i]-min) / (max-min))*h;
 
@@ -144,7 +134,7 @@ void cost_render(Costs costs, int x, int y, int w, int h)
         int y2 = y + BORDER_VPAD/2 + (1 - (costs.items[i+1]-min) / (max-min))*h;
 
         float thick = h*(5.0f/WINDOW_HEIGHT);
-        DrawLineEx((Vector2) {x1, y1}, (Vector2) {x2, y2}, thick, RED);
+        DrawLineEx((Vector2) {x1, y1}, (Vector2) {x2, y2}, thick, MAROON);
     }
 }
 
@@ -195,8 +185,10 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    NN_ASSERT(img_width1 == img_width2 && img_height1 == img_height2);
+
     // INTIALIZING THE NURAL NETWORK
-    size_t arch[] = {3, 10, 10, 1};
+    size_t arch[] = {3, 14, 14, 1};
     size_t rows = img_width1*img_height1 + img_height2*img_width2;
     size_t cols = arch[0] + arch[ARRAY_LEN(arch)-1];
     Mat t = mat_alloc(rows, cols);
@@ -244,30 +236,37 @@ int main(int argc, char** argv)
     size_t batch_start = 0;
     float cost = 0.f;
 
-    Image img_prev1 = GenImageColor(img_width1, img_height1, BLACK);
-    Texture2D training_prev1  = LoadTextureFromImage(img_prev1);
+    float scroll = 0.5f;
+    bool slider_clicked = false;
 
-    Image img_prev2 = GenImageColor(img_width2, img_height2, BLACK);
-    Texture2D training_prev2  = LoadTextureFromImage(img_prev2);
+    size_t prev_width = img_width1, prev_height = img_height1;
 
+    Image img_prev = GenImageColor(prev_width, prev_height, BLACK);
+    Texture2D training_prev1  = LoadTextureFromImage(img_prev);
+
+    /* Image img_prev2 = GenImageColor(prev_width, prev_height, BLACK); */
+    Texture2D training_prev2  = LoadTextureFromImage(img_prev);
+
+    /* Image img_prev3 = GenImageColor(prev_width, prev_height, BLACK); */
+    Texture2D training_prev3  = LoadTextureFromImage(img_prev);
 
     /* DRAWING THE DOWN LEFT TEXTURE (ORIGINAL OF FIRST IMAGE) */
-    for (int y = 0; y < img_height1; ++y) {
-        for (int x =  0; x < img_width1; ++x) {
-            uint8_t pixel = img_pixels1[y*img_width1+x];
-            ImageDrawPixel(&img_prev1, x, y, (Color) {pixel, pixel, pixel, 255});
+    for (size_t y = 0; y < prev_height; ++y) {
+        for (size_t x =  0; x < prev_width; ++x) {
+            uint8_t pixel = img_pixels1[y*prev_width+x];
+            ImageDrawPixel(&img_prev, x, y, (Color) {pixel, pixel, pixel, 255});
         }
     }
-    Texture2D original_prev1 = LoadTextureFromImage(img_prev1);
+    Texture2D original_prev1 = LoadTextureFromImage(img_prev);
 
     // DRAWING THE DOWN RIGHT TEXTURE (ORIGINAL OF SECOND IMAGE)
-    for (int y = 0; y < img_height2; ++y) {
-        for (int x =  0; x < img_width2; ++x) {
-            uint8_t pixel = img_pixels2[y*img_width2+x];
-            ImageDrawPixel(&img_prev2, x, y, (Color) {pixel, pixel, pixel, 255});
+    for (size_t y = 0; y < prev_height; ++y) {
+        for (size_t x =  0; x < prev_width; ++x) {
+            uint8_t pixel = img_pixels2[y*prev_width+x];
+            ImageDrawPixel(&img_prev, x, y, (Color) {pixel, pixel, pixel, 255});
         }
     }
-    Texture2D original_prev2 = LoadTextureFromImage(img_prev2);
+    Texture2D original_prev2 = LoadTextureFromImage(img_prev);
 
 
     while (!WindowShouldClose()) {
@@ -336,48 +335,92 @@ int main(int argc, char** argv)
         nn_render(nn, x, y, w, h);
 
         x += w;
-        float scale = h*10.f/WINDOW_HEIGHT;
+        float scale = h*7.f/WINDOW_HEIGHT;
 
         // DRAWING THE UP LEFT TEXTURE (TRAINING OF FIRST IMAGE)
-        for (int y = 0; y < img_height1; ++y) {
-            for (int x =  0; x < img_width1; ++x) {
-                MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(img_width1-1);
-                MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(img_height1-1);
+        for (size_t y = 0; y < prev_height; ++y) {
+            for (size_t x =  0; x < prev_width; ++x) {
+                MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(prev_width-1);
+                MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(prev_height-1);
                 MAT_AT(NN_INPUT(nn), 0, 2) = 0.0f;
 
-                // TODO: CAN I DRAW ALL OF THAT WITH JUST ONE IMAGE PREVIEW I THINK I CAN
                 nn_forward(nn);
                 uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255;
-                ImageDrawPixel(&img_prev1, x, y, (Color) {pixel, pixel, pixel, 255});
+                ImageDrawPixel(&img_prev, x, y, (Color) {pixel, pixel, pixel, 255});
             }
         }
 
-        Vector2 texture_position = (Vector2) {x+w/2-training_prev1.width*scale, y+h/2-training_prev1.height*scale};
-        UpdateTexture(training_prev1, img_prev1.data);
-        DrawTextureEx(training_prev1, texture_position, 0, scale, WHITE);
+        Vector2 texture_position = (Vector2) {x+w/2-training_prev1.width*scale, y+h/2-training_prev1.height*1.5f*scale};
+        UpdateTexture(training_prev1, img_prev.data);
+        DrawTextureEx(training_prev1, texture_position, 0, scale, RAYWHITE);
 
-        texture_position = (Vector2) {x+w/2-training_prev1.width*scale, y+h/2};
-        DrawTextureEx(original_prev1, texture_position, 0, scale, WHITE);
+        texture_position = (Vector2) {x+w/2-training_prev1.width*scale, y+h/2-training_prev1.height*0.5f*scale};
+        DrawTextureEx(original_prev1, texture_position, 0, scale, RAYWHITE);
 
         // DRAWING THE UP RIGHT TEXTURE (TRAINING OF SECOND IMAGE)
-        for (int y = 0; y < img_height2; ++y) {
-            for (int x =  0; x < img_width2; ++x) {
-                MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(img_width2-1);
-                MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(img_height2-1);
+        for (size_t y = 0; y < prev_height; ++y) {
+            for (size_t x =  0; x < prev_width; ++x) {
+                MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(prev_width-1);
+                MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(prev_height-1);
                 MAT_AT(NN_INPUT(nn), 0, 2) = 1.0f;
 
                 nn_forward(nn);
                 uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255;
-                ImageDrawPixel(&img_prev2, x, y, (Color) {pixel, pixel, pixel, 255});
+                ImageDrawPixel(&img_prev, x, y, (Color) {pixel, pixel, pixel, 255});
             }
         }
 
-        texture_position = (Vector2) {x+w/2, y+h/2-training_prev2.height*scale};
-        UpdateTexture(training_prev2, img_prev2.data);
-        DrawTextureEx(training_prev2, texture_position, 0, scale, WHITE);
+        texture_position = (Vector2) {x+w/2, y+h/2-training_prev2.height*1.5f*scale};
+        UpdateTexture(training_prev2, img_prev.data);
+        DrawTextureEx(training_prev2, texture_position, 0, scale, RAYWHITE);
 
-        texture_position = (Vector2) {x+w/2, y+h/2};
-        DrawTextureEx(original_prev2, texture_position, 0, scale, WHITE);
+        texture_position = (Vector2) {x+w/2, y+h/2-training_prev2.height*0.5f*scale};
+        DrawTextureEx(original_prev2, texture_position, 0, scale, RAYWHITE);
+
+        // DRAWING THE IN BETWEEN TEXTURE 
+        for (size_t y = 0; y < prev_height; ++y) {
+            for (size_t x =  0; x < prev_width; ++x) {
+                MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(prev_width-1);
+                MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(prev_height-1);
+                MAT_AT(NN_INPUT(nn), 0, 2) = scroll;
+
+                nn_forward(nn);
+                uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255;
+                ImageDrawPixel(&img_prev, x, y, (Color) {pixel, pixel, pixel, 255});
+            }
+        }
+        texture_position = (Vector2) {x+w/2-training_prev3.width/2*scale, y+h/2+training_prev3.height*0.5f*scale};
+        UpdateTexture(training_prev3, img_prev.data);
+        DrawTextureEx(training_prev3, texture_position, 0, scale, RAYWHITE);
+
+        // RENDERING THE SLIDER
+        Vector2 rect_corner = (Vector2) {x+w/2-training_prev1.width*scale, y+h/2+training_prev3.height*1.70f*scale};
+        Vector2 rect_size   = (Vector2) {2*training_prev1.width*scale, h*0.007};
+        DrawRectangleV(rect_corner, rect_size, RAYWHITE);
+        Vector2 slider_center = (Vector2) {(scroll*2*training_prev1.width*scale)+ x+w/2-training_prev1.width*scale, y+h/2+training_prev3.height*1.70f*scale};
+        float slider_raduis = h*((float)19/WINDOW_HEIGHT);
+        DrawCircleV(slider_center, slider_raduis, MAROON);
+
+        if (slider_clicked) {
+            float x = GetMousePosition().x;
+
+            if (x <= rect_corner.x) x = rect_corner.x;
+            if (x >= rect_corner.x+rect_size.x) x =rect_corner.x+rect_size.x;
+
+            scroll = (x - rect_corner.x) / rect_size.x;
+        }
+
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            float dist = Vector2Distance(GetMousePosition(), slider_center);
+            if (dist <= slider_raduis) {
+                slider_clicked = true;
+            }
+        }
+
+        if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
+            slider_clicked = false;
+        }
+
 
         char buffer[256];
         snprintf(buffer, sizeof(buffer),
