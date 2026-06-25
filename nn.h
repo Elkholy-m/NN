@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
+#include <float.h>
 #include <sys/param.h>
 
 #ifndef NN_ASSERT
@@ -72,7 +73,50 @@ void nn_backprop(NN nn, NN g, Mat ti, Mat to);
 void nn_learn(NN nn, NN g, float rate);
 void nn_zero(NN nn);
 
+#ifdef NN_ENABLE_GYM
+
+#ifndef WINDOW_FACTOR
+#define WINDOW_FACTOR 80
+#endif
+
+#ifndef WINDOW_WIDTH
+#define WINDOW_WIDTH  (16*WINDOW_FACTOR)
+#endif
+
+#ifndef WINDOW_HEIGHT
+#define WINDOW_HEIGHT (9*WINDOW_FACTOR)
+#endif
+
+#include <raylib.h>
+#include <raymath.h>
+
+#define DA_INIT_CAPACITY 256
+#define BORDER_VPAD 50
+#define BORDER_HPAD 50
+
+#define DA_APPEND(da, item)                                                            \
+    do {                                                                               \
+        if ((da)->count >= (da)->capacity) {                                           \
+            (da)->capacity = (da)->capacity == 0? DA_INIT_CAPACITY : (da)->capacity*2; \
+            (da)->items = realloc((da)->items, sizeof(*(da)->items)*(da)->capacity);   \
+            assert((da)->items != NULL && "Fail to realloc the dynamic array");        \
+        }                                                                              \
+        (da)->items[(da)->count++] = item;                                             \
+    } while(0)
+
+typedef struct {
+    float* items;
+    size_t capacity;
+    size_t count;
+} Costs;
+
+void gym_nn_render(NN nn, int x, int y, int w, int h);
+void gym_cost_render(Costs costs, int x, int y, int w, int h);
+#endif // !NN_ENABLE_GYM_
+
+
 #endif // !NN_H_
+
 
 #ifdef NN_IMPLEMENTATION
 float rand_float() {
@@ -436,4 +480,102 @@ void nn_zero(NN nn) {
     }
     mat_fill(nn.as[nn.count], 0);
 }
+
+#ifdef NN_ENABLE_GYM
+void gym_nn_render(NN nn, int x, int y, int w, int h)
+{
+    unsigned int neuron_raduis = h*((float)25/WINDOW_HEIGHT);
+    Color low__color       = MAROON;
+    Color high_color       = DARKGREEN;
+
+    size_t nn_x = w - 2*BORDER_HPAD;
+    size_t nn_y = h - 2*BORDER_VPAD;
+
+    size_t no_of_layers = nn.count + 1;
+    int hpad = nn_x/no_of_layers;
+    
+    for (size_t i = 0; i < no_of_layers; i++) {
+        int vpad_1 = nn_y/nn.as[i].cols;
+        for (size_t j = 0; j < nn.as[i].cols; j++) {
+            int cx1 = x + BORDER_HPAD + i*hpad + hpad/2;
+            int cy1 = y +BORDER_VPAD + j*vpad_1 + vpad_1/2;
+            if (i < (no_of_layers - 1)) {
+                int vpad_2 = nn_y/nn.as[i+1].cols;
+                for (size_t k = 0; k < nn.as[i+1].cols; k++) {
+                    int cx2 = x + BORDER_HPAD + (i+1)*hpad + hpad/2;
+                    int cy2 = y +BORDER_VPAD + k*vpad_2 + vpad_2/2;
+                    
+                    float alpha = sigmoidf(MAT_AT(nn.ws[i], j, k));;
+                    float thick = h*(3.0f/WINDOW_HEIGHT);
+                    Color connection_color = ColorAlphaBlend(low__color, high_color, RAYWHITE);
+                    high_color.a = floorf(255.f*alpha);
+                    DrawLineEx((Vector2){cx1, cy1}, (Vector2){cx2, cy2}, thick, connection_color);
+                }
+            }
+            if (i == 0) {
+                DrawCircle(cx1, cy1, neuron_raduis, GRAY);
+            } else {
+                high_color.a = floorf(255.f*sigmoidf(MAT_AT(nn.bs[i-1], 0, j)));
+                Color neuron_color = ColorAlphaBlend(low__color, high_color, RAYWHITE);
+                DrawCircle(cx1, cy1, neuron_raduis, neuron_color);
+            }
+        }
+    }
+}
+
+void gym_cost_render(Costs costs, int x, int y, int w, int h)
+{
+    char buffer[256];
+    float font_size = h*(50.0f/WINDOW_HEIGHT);
+
+    snprintf(buffer, sizeof(buffer), "COST-FUNCTION");
+    int tw =  MeasureText(buffer, font_size);
+    DrawText(buffer, x+(w/2-tw/2), y+h, font_size, RAYWHITE);
+
+    w -= BORDER_HPAD;
+    h -= BORDER_VPAD;
+
+    float min = FLT_MAX, max = FLT_MIN;
+
+    for (size_t i = 0; i < costs.count; i++) {
+        if (costs.items[i] < min) min = costs.items[i];
+        if (costs.items[i] > max) max = costs.items[i];
+    }
+
+    if (min > 0) min = 0;
+    size_t n = costs.count;
+    if (n < 1000) n = 1000;
+
+    // DRAW THE AXIS LINES
+    int thick = h*(5.0f/WINDOW_HEIGHT);
+    int lx = x+BORDER_HPAD/2-thick;
+    int ly = y+BORDER_HPAD/2-thick;
+    float tri_val = (h*10.f/WINDOW_HEIGHT);
+
+    // X-AXIS 
+    DrawLineEx((Vector2) {lx, ly+h}, (Vector2) {lx+w, ly+h}, thick, RAYWHITE);
+    DrawTriangle((Vector2) {lx+w, ly+h-tri_val}, (Vector2) {lx+w, ly+h+tri_val}, (Vector2) {lx+w+tri_val, ly+h}, RAYWHITE);
+
+    // Y-AXIS
+    DrawLineEx((Vector2) {lx, ly}, (Vector2) {lx, ly+h}, thick, RAYWHITE);
+    DrawTriangle((Vector2) {lx-tri_val, ly}, (Vector2) {lx+tri_val, ly}, (Vector2) {lx, ly-tri_val}, RAYWHITE);
+
+    snprintf(buffer, sizeof(buffer), "0");
+    DrawText(buffer, lx+5, ly+h+5, font_size, RAYWHITE);
+
+
+    for (size_t i = 0; (i+1) < costs.count; i++) {
+        int x1 = x + BORDER_HPAD/2 + (float)w/n*i;
+        int y1 = y + BORDER_VPAD/2 + (1 - (costs.items[i]-min) / (max-min))*h;
+
+        int x2 = x + BORDER_HPAD/2 + (float)w/n*(i+1);
+        int y2 = y + BORDER_VPAD/2 + (1 - (costs.items[i+1]-min) / (max-min))*h;
+
+        float thick = h*(5.0f/WINDOW_HEIGHT);
+        DrawLineEx((Vector2) {x1, y1}, (Vector2) {x2, y2}, thick, MAROON);
+    }
+}
+
+#endif // !NN_ENABLE_GYM_
+
 #endif // NN_IMPLEMENTATION

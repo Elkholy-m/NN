@@ -1,194 +1,174 @@
+#include <stdarg.h>
 #include <stdio.h>
 #include <time.h>
-#include <float.h>
-#include <raylib.h>
-#include <raymath.h>
+
+#define HELPER_IMPLEMENTATION
+#include "helper.h"
 #include "stb_image.h"
 #include "stb_image_write.h"
 
 #define NN_IMPLEMENTATION
+#define NN_ENABLE_GYM
 #include "nn.h"
 
-#define DA_INIT_CAPACITY 256
-#define WINDOW_FACTOR 80
-#define WINDOW_WIDTH  (16*WINDOW_FACTOR)
-#define WINDOW_HEIGHT (9*WINDOW_FACTOR)
-#define BORDER_VPAD 50
-#define BORDER_HPAD 50
+// TODO: THE SCREEN SHOT FUNCTION
+// TODO: THE SCREEN SHOT BUTTON (S)
+// TODO: THE SAVE  IMAGE FUNCTION
+// TODO: GENERATE VIDEO USING FFMPEG
 
-#define DA_APPEND(da, item)                                                            \
-    do {                                                                               \
-        if ((da)->count >= (da)->capacity) {                                           \
-            (da)->capacity = (da)->capacity == 0? DA_INIT_CAPACITY : (da)->capacity*2; \
-            (da)->items = realloc((da)->items, sizeof(*(da)->items)*(da)->capacity);   \
-            assert((da)->items != NULL && "Fail to realloc the dynamic array");        \
-        }                                                                              \
-        (da)->items[(da)->count++] = item;                                             \
-    } while(0)
+size_t arch[] = {3, 14, 14, 11, 1};
 
-typedef struct {
-    float* items;
-    size_t capacity;
-    size_t count;
-} Costs;
-
-const char* get_file_name(const char* file_path)
+void original_img_construct(Image* img_prev, uint8_t* pixels)
 {
-    // windows
-    const char* res = strrchr(file_path, '\\');
-    if (!res) {
-        // linux
-        res = strrchr(file_path, '/');
-    }
-
-    return res ? res+1 : file_path;
-}
-
-void nn_render(NN nn, int x, int y, int w, int h)
-{
-    unsigned int neuron_raduis = h*((float)25/WINDOW_HEIGHT);
-    Color low__color       = MAROON;   //{.a =0xFF, .b =0xFF, .g =0x00, .r =0xFF};
-    Color high_color       = DARKGREEN;//{.a =0xFF, .b =0x00, .g =0xFF, .r =0x00};
-
-    size_t nn_x = w - 2*BORDER_HPAD;
-    size_t nn_y = h - 2*BORDER_VPAD;
-
-    size_t no_of_layers = nn.count + 1;
-    int hpad = nn_x/no_of_layers;
-    
-    for (size_t i = 0; i < no_of_layers; i++) {
-        int vpad_1 = nn_y/nn.as[i].cols;
-        for (size_t j = 0; j < nn.as[i].cols; j++) {
-            int cx1 = x + BORDER_HPAD + i*hpad + hpad/2;
-            int cy1 = y +BORDER_VPAD + j*vpad_1 + vpad_1/2;
-            if (i < (no_of_layers - 1)) {
-                int vpad_2 = nn_y/nn.as[i+1].cols;
-                for (size_t k = 0; k < nn.as[i+1].cols; k++) {
-                    int cx2 = x + BORDER_HPAD + (i+1)*hpad + hpad/2;
-                    int cy2 = y +BORDER_VPAD + k*vpad_2 + vpad_2/2;
-                    
-                    float alpha = sigmoidf(MAT_AT(nn.ws[i], j, k));;
-                    float thick = h*(3.0f/WINDOW_HEIGHT);
-                    Color connection_color = ColorAlphaBlend(low__color, high_color, RAYWHITE);
-                    high_color.a = floorf(255.f*alpha);
-                    DrawLineEx((Vector2){cx1, cy1}, (Vector2){cx2, cy2}, thick, connection_color);
-                }
-            }
-            if (i == 0) {
-                DrawCircle(cx1, cy1, neuron_raduis, GRAY);
-            } else {
-                high_color.a = floorf(255.f*sigmoidf(MAT_AT(nn.bs[i-1], 0, j)));
-                Color neuron_color = ColorAlphaBlend(low__color, high_color, RAYWHITE);
-                DrawCircle(cx1, cy1, neuron_raduis, neuron_color);
-            }
+    for (int y = 0; y < img_prev->height; ++y) {
+        for (int x =  0; x < img_prev->width; ++x) {
+            uint8_t pixel = pixels[y*img_prev->width+x];
+            ImageDrawPixel(img_prev, x, y, (Color) {pixel, pixel, pixel, 255});
         }
     }
 }
 
-void cost_render(Costs costs, int x, int y, int w, int h)
+void verify_img_construct(Image* img_prev, NN nn, float scroll)
 {
-    char buffer[256];
-    float font_size = h*(50.0f/WINDOW_HEIGHT);
+    for (int y = 0; y < img_prev->height; ++y) {
+        for (int x =  0; x < img_prev->width; ++x) {
+            MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(img_prev->width-1);
+            MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(img_prev->height-1);
+            MAT_AT(NN_INPUT(nn), 0, 2) = scroll;
 
-    snprintf(buffer, sizeof(buffer), "COST-FUNCTION");
-    int tw =  MeasureText(buffer, font_size);
-    DrawText(buffer, x+(w/2-tw/2), y+h, font_size, RAYWHITE);
-
-    w -= BORDER_HPAD;
-    h -= BORDER_VPAD;
-
-    float min = FLT_MAX, max = FLT_MIN;
-
-    for (size_t i = 0; i < costs.count; i++) {
-        if (costs.items[i] < min) min = costs.items[i];
-        if (costs.items[i] > max) max = costs.items[i];
-    }
-
-    if (min > 0) min = 0;
-    size_t n = costs.count;
-    if (n < 1000) n = 1000;
-
-    // DRAW THE AXIS LINES
-    int thick = h*(5.0f/WINDOW_HEIGHT);
-    int lx = x+BORDER_HPAD/2-thick;
-    int ly = y+BORDER_HPAD/2-thick;
-    float tri_val = (h*10.f/WINDOW_HEIGHT);
-
-    // X-AXIS 
-    DrawLineEx((Vector2) {lx, ly+h}, (Vector2) {lx+w, ly+h}, thick, RAYWHITE);
-    DrawTriangle((Vector2) {lx+w, ly+h-tri_val}, (Vector2) {lx+w, ly+h+tri_val}, (Vector2) {lx+w+tri_val, ly+h}, RAYWHITE);
-
-    // Y-AXIS
-    DrawLineEx((Vector2) {lx, ly}, (Vector2) {lx, ly+h}, thick, RAYWHITE);
-    DrawTriangle((Vector2) {lx-tri_val, ly}, (Vector2) {lx+tri_val, ly}, (Vector2) {lx, ly-tri_val}, RAYWHITE);
-
-    snprintf(buffer, sizeof(buffer), "0");
-    DrawText(buffer, lx+5, ly+h+5, font_size, RAYWHITE);
-
-
-    for (size_t i = 0; (i+1) < costs.count; i++) {
-        int x1 = x + BORDER_HPAD/2 + (float)w/n*i;
-        int y1 = y + BORDER_VPAD/2 + (1 - (costs.items[i]-min) / (max-min))*h;
-
-        int x2 = x + BORDER_HPAD/2 + (float)w/n*(i+1);
-        int y2 = y + BORDER_VPAD/2 + (1 - (costs.items[i+1]-min) / (max-min))*h;
-
-        float thick = h*(5.0f/WINDOW_HEIGHT);
-        DrawLineEx((Vector2) {x1, y1}, (Vector2) {x2, y2}, thick, MAROON);
+            nn_forward(nn);
+            uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255;
+            ImageDrawPixel(img_prev, x, y, (Color) {pixel, pixel, pixel, 255});
+        }
     }
 }
 
-char* shift_args(int* argc, char*** argv)
+void slider_render(int x, int y, int w, int h, float* scroll, float scale, bool* slider_clicked, Texture2D training_prev)
 {
-    char* result = *argv[0];
-    *argc -= 1;
-    *argv += 1;
-    return result; 
+        Vector2 rect_corner = (Vector2) {x+w/2-training_prev.width*scale, y+h/2+training_prev.height*1.70f*scale};
+        Vector2 rect_size   = (Vector2) {2*training_prev.width*scale, h*0.007};
+        DrawRectangleV(rect_corner, rect_size, RAYWHITE);
+        Vector2 slider_center = (Vector2) {
+            (*scroll*2*training_prev.width*scale)+ x+w/2-training_prev.width*scale,
+            y+h/2+training_prev.height*1.70f*scale};
+        float slider_raduis = h*((float)19/WINDOW_HEIGHT);
+        DrawCircleV(slider_center, slider_raduis, MAROON);
+
+        if (*slider_clicked) {
+            float x = GetMousePosition().x;
+
+            if (x <= rect_corner.x) x = rect_corner.x;
+            if (x >= rect_corner.x+rect_size.x) x =rect_corner.x+rect_size.x;
+
+            *scroll = (x - rect_corner.x) / rect_size.x;
+        }
+
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            float dist = Vector2Distance(GetMousePosition(), slider_center);
+            if (dist <= slider_raduis) {
+                *slider_clicked = true;
+            }
+        }
+
+        if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
+            *slider_clicked = false;
+        }
+}
+
+void verification_render(Image* img_prev, NN nn,
+                         int x, int y, int w, int h,
+                         float scale, float* scroll, bool* slider_clicked,
+                         Texture2D training_prev1, Texture2D training_prev2, Texture2D training_prev3,
+                         Texture2D original_prev1, Texture2D original_prev2)
+{
+    // DRAWING THE DOWN LEFT TEXTURE (TRAINING OF FIRST IMAGE)
+    verify_img_construct(img_prev, nn, 0.0f);
+    Vector2 texture_position = {x+w/2-training_prev1.width*scale, y+h/2-training_prev1.height*0.5f*scale};
+    UpdateTexture(training_prev1, img_prev->data);
+    DrawTextureEx(training_prev1, texture_position, 0, scale, RAYWHITE);
+
+    // DRAWING THE UP LEFT TEXTURE (ORIGINAL OF FIRST IMAGE)
+    texture_position = (Vector2) {x+w/2-training_prev1.width*scale, y+h/2-training_prev1.height*1.5f*scale};
+    DrawTextureEx(original_prev1, texture_position, 0, scale, RAYWHITE);
+
+    // DRAWING THE DOWN RIGHT TEXTURE (TRAINING OF SECOND IMAGE)
+    verify_img_construct(img_prev, nn, 1.0f);
+    texture_position = (Vector2) {x+w/2, y+h/2-training_prev2.height*0.5f*scale};
+    UpdateTexture(training_prev2, img_prev->data);
+    DrawTextureEx(training_prev2, texture_position, 0, scale, RAYWHITE);
+
+    // DRAWING THE UP RIGHT TEXTURE (ORIGINAL OF SECOND IMAGE)
+    texture_position = (Vector2) {x+w/2, y+h/2-training_prev2.height*1.5f*scale};
+    DrawTextureEx(original_prev2, texture_position, 0, scale, RAYWHITE);
+
+    // DRAWING THE IN BETWEEN TEXTURE 
+    verify_img_construct(img_prev, nn, *scroll);
+    texture_position = (Vector2) {x+w/2-training_prev3.width/2*scale, y+h/2+training_prev3.height*0.5f*scale};
+    UpdateTexture(training_prev3, img_prev->data);
+    DrawTextureEx(training_prev3, texture_position, 0, scale, RAYWHITE);
+
+    // RENDERING THE SLIDER
+    slider_render(x, y, w, h, scroll, scale, slider_clicked, training_prev1);
+}
+
+void status_line_render(int h, int rw, size_t epoch, size_t max_epoch, float rate, float cost)
+{
+    char buffer[256];
+    snprintf(buffer, sizeof(buffer),
+             "Epoch: %zu/%zu\t\tRate: %.2f\t\tCost: %f",
+             epoch, max_epoch, rate, cost);
+        
+    float font_size = h*(50.0f/WINDOW_HEIGHT);
+    int tw =  MeasureText(buffer, font_size);
+    DrawText(buffer, rw/2-tw/2, 30, font_size, WHITE);
+}
+
+void nn_image_snapshot(NN nn, float scroll, const char* img_file_path)
+{
+    char out_file_path[256];
+    size_t out_width  = 512;
+    size_t out_height = 512;
+    uint8_t *out_pixels = malloc(sizeof(*out_pixels)*out_width*out_height);
+    assert(out_pixels != NULL);
+
+    for (size_t y = 0; y < out_height; ++y) {
+        for (size_t x = 0; x < out_width; ++x) {
+            MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(out_width - 1);
+            MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(out_height - 1);
+            MAT_AT(NN_INPUT(nn), 0, 2) = scroll;
+
+            nn_forward(nn);
+            uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255.f;
+            out_pixels[y*out_width + x] = pixel;
+        }
+    }
+
+    snprintf(out_file_path, sizeof(out_file_path), "upscaled/%s", get_file_name(img_file_path));
+    check(!stbi_write_png(out_file_path, out_width, out_height, 1, out_pixels, out_width*sizeof(*out_pixels)),
+          "ERROR: could not save image %s\n", out_file_path);
+    printf("INFO: Generated %s\n", out_file_path);
 }
 
 int main(int argc, char** argv)
 {
     char* program = shift_args(&argc, &argv);
-    if (argc <= 0) {
-        fprintf(stderr, "Usage: %s <image_1> <image_2>\n", program);
-        return 1;
-    }
+    check(argc <= 0, "Usage: %s <image_1> <image_2>\n", program); 
 
     char* img_file_path1 = shift_args(&argc, &argv);
-    if (argc <= 0) {
-        fprintf(stderr, "Usage: %s <image_1> <image_2>\n", program);
-        return 1;
-    }
+    check(argc <= 0, "Usage: %s <image_1> <image_2>\n", program); 
 
     int img_width1, img_height1, img_comp1;
     uint8_t* img_pixels1 = (uint8_t*)stbi_load(img_file_path1, &img_width1, &img_height1, &img_comp1, 0);
-    if (img_pixels1 == NULL) {
-        fprintf(stderr, "ERROR: Couldn't open file: %s\n", img_file_path1);
-        return 1;
-    }
 
-    if (img_comp1 != 1) {
-        fprintf(stderr, "ERROR: The image is not grey scaled it has %d components\n", img_comp1);
-        return 1;
-    }
+    check(img_pixels1 == NULL, "Couldn't open file: %s\n", img_file_path1);
+    check(img_comp1 != 1, "The image: %s is not grey scaled it has %d components\n", img_file_path1, img_comp1);
 
-    char* img_file_path2 = shift_args(&argc, &argv);
     int img_width2, img_height2, img_comp2;
+    char* img_file_path2 = shift_args(&argc, &argv);
     uint8_t* img_pixels2 = (uint8_t*)stbi_load(img_file_path2, &img_width2, &img_height2, &img_comp2, 0);
-    if (img_pixels2 == NULL) {
-        fprintf(stderr, "ERROR: Couldn't open file: %s\n", img_file_path2);
-        return 1;
-    }
+    check(img_pixels2 == NULL, "Couldn't open file: %s\n", img_file_path2);
+    check(img_comp2 != 1, "The image: %s is not grey scaled it has %d components\n", img_file_path2, img_comp2);
 
-    if (img_comp2 != 1) {
-        fprintf(stderr, "ERROR: The image is not grey scaled it has %d components\n", img_comp2);
-        return 1;
-    }
-
-    NN_ASSERT(img_width1 == img_width2 && img_height1 == img_height2);
-
-    // INTIALIZING THE NURAL NETWORK
-    size_t arch[] = {3, 14, 14, 1};
     size_t rows = img_width1*img_height1 + img_height2*img_width2;
     size_t cols = arch[0] + arch[ARRAY_LEN(arch)-1];
     Mat t = mat_alloc(rows, cols);
@@ -210,20 +190,13 @@ int main(int argc, char** argv)
             MAT_AT(t, i, 1) = (float)y/(img_height2-1);
             MAT_AT(t, i, 2) = 1.0f;
 
-            // HERE IS THE BUG THAT ALSO ALEXI AND ME FACE 
+            // HERE IS THE BUG THAT ME AND ALEXI FACE 
             MAT_AT(t, i, 3) = img_pixels2[y*img_width2+x]/255.f;
         }
     }
 
     NN nn = nn_alloc(arch, ARRAY_LEN(arch));
     NN g  = nn_alloc(arch, ARRAY_LEN(arch));
-    nn_rand(nn, -1, 1);
-
-    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "IMAGE-STORAGE");;
-    SetTargetFPS(60);
-
-    srand(time(0));
     float rate = 1;
     size_t epoch = 0;
     size_t max_epoch = 100000;
@@ -239,37 +212,31 @@ int main(int argc, char** argv)
     float scroll = 0.5f;
     bool slider_clicked = false;
 
-    size_t prev_width = img_width1, prev_height = img_height1;
+    srand(time(0));
+    nn_rand(nn, -1, 1);
 
-    Image img_prev = GenImageColor(prev_width, prev_height, BLACK);
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
+    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "IMAGE-STORAGE");;
+    SetTargetFPS(60);
+
+    // LET THIS ASSERTION FOR NOW
+    // IT HELP ME IN RENDERING THE VERIFICATION SECTION
+    // IN FUTURE I WILL REMOVE IT
+    assert(img_width1 == img_width2 && img_height1 == img_height2);
+
+    Image img_prev = GenImageColor(img_width1, img_height1, BLACK);
     Texture2D training_prev1  = LoadTextureFromImage(img_prev);
-
-    /* Image img_prev2 = GenImageColor(prev_width, prev_height, BLACK); */
     Texture2D training_prev2  = LoadTextureFromImage(img_prev);
-
-    /* Image img_prev3 = GenImageColor(prev_width, prev_height, BLACK); */
     Texture2D training_prev3  = LoadTextureFromImage(img_prev);
 
-    /* DRAWING THE DOWN LEFT TEXTURE (ORIGINAL OF FIRST IMAGE) */
-    for (size_t y = 0; y < prev_height; ++y) {
-        for (size_t x =  0; x < prev_width; ++x) {
-            uint8_t pixel = img_pixels1[y*prev_width+x];
-            ImageDrawPixel(&img_prev, x, y, (Color) {pixel, pixel, pixel, 255});
-        }
-    }
+    original_img_construct(&img_prev, img_pixels1);
     Texture2D original_prev1 = LoadTextureFromImage(img_prev);
 
-    // DRAWING THE DOWN RIGHT TEXTURE (ORIGINAL OF SECOND IMAGE)
-    for (size_t y = 0; y < prev_height; ++y) {
-        for (size_t x =  0; x < prev_width; ++x) {
-            uint8_t pixel = img_pixels2[y*prev_width+x];
-            ImageDrawPixel(&img_prev, x, y, (Color) {pixel, pixel, pixel, 255});
-        }
-    }
+    original_img_construct(&img_prev, img_pixels2);
     Texture2D original_prev2 = LoadTextureFromImage(img_prev);
 
-
     while (!WindowShouldClose()) {
+        // RESET THE NURAL NETWORK
         if(IsKeyPressed(KEY_R)) {
             paused = true;
             epoch = 0;
@@ -277,10 +244,26 @@ int main(int argc, char** argv)
             costs.count = 0;
         }
 
+        // TAKE SNAP SHOT OF THE BOTTOM TEXTURE
+        if (IsKeyPressed(KEY_S)) {
+            time_t sec = time(0);
+            struct tm* now = localtime(&sec);
+            char buffer[256];
+
+
+            check(strftime(buffer, sizeof(buffer), "%Y-%m-%d_%H-%M-%S.png", now) < 1,
+                  "strftime() ==> Couldn't format the time");
+            nn_image_snapshot(nn, scroll, buffer);
+        }
+
+        // PAUSE THE LEARNING
         if (IsKeyPressed(KEY_SPACE)) paused = !paused;
+
+        // LEARNING PROCESS
         for (size_t j = 0; j < batch_per_frame && epoch < max_epoch && !paused; j++) {
-            // DETECT THE FINAL BATCH
             size_t size = batch_size;
+
+            // DETECT THE FINAL BATCH
             if ((batch_start+batch_size) >= t.rows) size = t.rows - batch_start;
 
             // CONSTRUCT TI, TO BASED ON THE BATCH
@@ -314,7 +297,6 @@ int main(int argc, char** argv)
                 batch_start = 0;
             }
         }    
-        
 
         Color background_color = {.a =0xFF, .b =0x18, .g =0x18, .r =0x18};
         BeginDrawing();
@@ -329,181 +311,30 @@ int main(int argc, char** argv)
         h = rh*9/16;
         y = rh/2-h/2;
 
-        cost_render(costs, x, y, w, h);
+        // COST PLOT RENDERING
+        gym_cost_render(costs, x, y, w, h);
         
         x += w;
-        nn_render(nn, x, y, w, h);
+
+        // NURAL NETWORK RENDERING
+        gym_nn_render(nn, x, y, w, h);
 
         x += w;
-        float scale = h*7.f/WINDOW_HEIGHT;
+        float scale = h*8.f/WINDOW_HEIGHT;
 
-        // DRAWING THE UP LEFT TEXTURE (TRAINING OF FIRST IMAGE)
-        for (size_t y = 0; y < prev_height; ++y) {
-            for (size_t x =  0; x < prev_width; ++x) {
-                MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(prev_width-1);
-                MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(prev_height-1);
-                MAT_AT(NN_INPUT(nn), 0, 2) = 0.0f;
+        // VERIFICATIOIN RENDERING
+        verification_render(&img_prev, nn,
+                            x, y, w, h, scale,
+                            &scroll, &slider_clicked,
+                            training_prev1, training_prev2, training_prev3,
+                            original_prev1, original_prev2);
 
-                nn_forward(nn);
-                uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255;
-                ImageDrawPixel(&img_prev, x, y, (Color) {pixel, pixel, pixel, 255});
-            }
-        }
-
-        Vector2 texture_position = (Vector2) {x+w/2-training_prev1.width*scale, y+h/2-training_prev1.height*1.5f*scale};
-        UpdateTexture(training_prev1, img_prev.data);
-        DrawTextureEx(training_prev1, texture_position, 0, scale, RAYWHITE);
-
-        texture_position = (Vector2) {x+w/2-training_prev1.width*scale, y+h/2-training_prev1.height*0.5f*scale};
-        DrawTextureEx(original_prev1, texture_position, 0, scale, RAYWHITE);
-
-        // DRAWING THE UP RIGHT TEXTURE (TRAINING OF SECOND IMAGE)
-        for (size_t y = 0; y < prev_height; ++y) {
-            for (size_t x =  0; x < prev_width; ++x) {
-                MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(prev_width-1);
-                MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(prev_height-1);
-                MAT_AT(NN_INPUT(nn), 0, 2) = 1.0f;
-
-                nn_forward(nn);
-                uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255;
-                ImageDrawPixel(&img_prev, x, y, (Color) {pixel, pixel, pixel, 255});
-            }
-        }
-
-        texture_position = (Vector2) {x+w/2, y+h/2-training_prev2.height*1.5f*scale};
-        UpdateTexture(training_prev2, img_prev.data);
-        DrawTextureEx(training_prev2, texture_position, 0, scale, RAYWHITE);
-
-        texture_position = (Vector2) {x+w/2, y+h/2-training_prev2.height*0.5f*scale};
-        DrawTextureEx(original_prev2, texture_position, 0, scale, RAYWHITE);
-
-        // DRAWING THE IN BETWEEN TEXTURE 
-        for (size_t y = 0; y < prev_height; ++y) {
-            for (size_t x =  0; x < prev_width; ++x) {
-                MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(prev_width-1);
-                MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(prev_height-1);
-                MAT_AT(NN_INPUT(nn), 0, 2) = scroll;
-
-                nn_forward(nn);
-                uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255;
-                ImageDrawPixel(&img_prev, x, y, (Color) {pixel, pixel, pixel, 255});
-            }
-        }
-        texture_position = (Vector2) {x+w/2-training_prev3.width/2*scale, y+h/2+training_prev3.height*0.5f*scale};
-        UpdateTexture(training_prev3, img_prev.data);
-        DrawTextureEx(training_prev3, texture_position, 0, scale, RAYWHITE);
-
-        // RENDERING THE SLIDER
-        Vector2 rect_corner = (Vector2) {x+w/2-training_prev1.width*scale, y+h/2+training_prev3.height*1.70f*scale};
-        Vector2 rect_size   = (Vector2) {2*training_prev1.width*scale, h*0.007};
-        DrawRectangleV(rect_corner, rect_size, RAYWHITE);
-        Vector2 slider_center = (Vector2) {(scroll*2*training_prev1.width*scale)+ x+w/2-training_prev1.width*scale, y+h/2+training_prev3.height*1.70f*scale};
-        float slider_raduis = h*((float)19/WINDOW_HEIGHT);
-        DrawCircleV(slider_center, slider_raduis, MAROON);
-
-        if (slider_clicked) {
-            float x = GetMousePosition().x;
-
-            if (x <= rect_corner.x) x = rect_corner.x;
-            if (x >= rect_corner.x+rect_size.x) x =rect_corner.x+rect_size.x;
-
-            scroll = (x - rect_corner.x) / rect_size.x;
-        }
-
-        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-            float dist = Vector2Distance(GetMousePosition(), slider_center);
-            if (dist <= slider_raduis) {
-                slider_clicked = true;
-            }
-        }
-
-        if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
-            slider_clicked = false;
-        }
-
-
-        char buffer[256];
-        snprintf(buffer, sizeof(buffer),
-                 "Epoch: %zu/%zu\t\tRate: %.2f\t\tCost: %f",
-                 epoch, max_epoch, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
-        
-        float font_size = h*(50.0f/WINDOW_HEIGHT);
-        int tw =  MeasureText(buffer, font_size);
-        DrawText(buffer, rw/2-tw/2, 30, font_size, WHITE);
-
+        // STATUS LINE RENDERING
+        status_line_render(h, rw, epoch, max_epoch, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
         EndDrawing();
     }
 
-    char snapshot_file_path[256];
-    snprintf(snapshot_file_path, sizeof(snapshot_file_path),
-             "./nn_screen_shots/%s", get_file_name(img_file_path1));
-    TakeScreenshot(snapshot_file_path);
+    TakeScreenshot("screenshot.png");
     CloseWindow();
-    
-    size_t out_width  = 512;
-    size_t out_height = 512;
-    uint8_t *out_pixels = malloc(sizeof(*out_pixels)*out_width*out_height);
-    assert(out_pixels != NULL);
-
-    for (size_t y = 0; y < out_height; ++y) {
-        for (size_t x = 0; x < out_width; ++x) {
-            MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(out_width - 1);
-            MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(out_height - 1);
-            MAT_AT(NN_INPUT(nn), 0, 2) = 0.0f;
-
-            nn_forward(nn);
-            uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255.f;
-            out_pixels[y*out_width + x] = pixel;
-        }
-    }
-
-    char out_file_path[256];
-    snprintf(out_file_path, sizeof(out_file_path),
-             "upscaled/%s", get_file_name(img_file_path1));
-    if (!stbi_write_png(out_file_path, out_width, out_height, 1, out_pixels, out_width*sizeof(*out_pixels))) {
-        fprintf(stderr, "ERROR: could not save image %s\n", out_file_path);
-        return 1;
-    }
-    printf("Generated %s from %s\n", out_file_path, img_file_path1);
-
-    snprintf(out_file_path, sizeof(out_file_path),
-             "upscaled/%s", get_file_name(img_file_path2));
-    for (size_t y = 0; y < out_height; ++y) {
-        for (size_t x = 0; x < out_width; ++x) {
-            MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(out_width - 1);
-            MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(out_height - 1);
-            MAT_AT(NN_INPUT(nn), 0, 2) = 1.0f;
-
-            nn_forward(nn);
-            uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255.f;
-            out_pixels[y*out_width + x] = pixel;
-        }
-    }
-    if (!stbi_write_png(out_file_path, out_width, out_height, 1, out_pixels, out_width*sizeof(*out_pixels))) {
-        fprintf(stderr, "ERROR: could not save image %s\n", out_file_path);
-        return 1;
-    }
-    printf("Generated %s from %s\n", out_file_path, img_file_path2);
-
-
-    snprintf(out_file_path, sizeof(out_file_path),
-             "upscaled/something_between.png");
-    for (size_t y = 0; y < out_height; ++y) {
-        for (size_t x = 0; x < out_width; ++x) {
-            MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(out_width - 1);
-            MAT_AT(NN_INPUT(nn), 0, 1) = (float)y/(out_height - 1);
-            MAT_AT(NN_INPUT(nn), 0, 2) = 0.5f;
-
-            nn_forward(nn);
-            uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255.f;
-            out_pixels[y*out_width + x] = pixel;
-        }
-    }
-    if (!stbi_write_png(out_file_path, out_width, out_height, 1, out_pixels, out_width*sizeof(*out_pixels))) {
-        fprintf(stderr, "ERROR: could not save image %s\n", out_file_path);
-        return 1;
-    }
-    printf("Generated %s from nothing\n", out_file_path);
-
     return 0;
 }
