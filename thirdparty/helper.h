@@ -7,6 +7,11 @@ const char* get_file_name(const char* file_path);
 char* shift_args(int* argc, char*** argv);
 void check(bool expr, const char* errormsg, ...);
 
+typedef struct {
+    int start;
+    int end;
+} Segment;
+
 #ifdef HELPER_IMPLEMENTATION
 const char* get_file_name(const char* file_path)
 {

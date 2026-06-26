@@ -17,13 +17,11 @@
 #define STR(s) STR2(s)
 #define READ_END 0
 #define WRITE_END 1
-#define FPS 60
+#define FPS 30
 
-#define out_width  512
-#define out_height 512
+#define out_width  256
+#define out_height 256
 uint32_t out_pixels[out_width*out_height];
-
-// TODO: GENERATE VIDEO USING FFMPEG
 
 size_t arch[] = {3, 14, 14, 11, 1};
 
@@ -195,15 +193,30 @@ void render_ffmpeg_video(NN nn, float duration, const char* out_video_path)
         check(res < 0, "execlp() failure");
         close(pipefd[READ_END]);
 
-        // THIS CODE MUST BE UNREACHABLE
         exit(EXIT_FAILURE);
     }
 
     close(pipefd[READ_END]);
+
+    // ADDING SOME EASE-IN EASE-OUT LOGIC
+    Segment segments[] = {
+        {0, 0},
+        {0, 1},
+        {1, 1},
+        {1, 0},
+        {0, 0},
+    };
+    size_t no_segments = ARRAY_LEN(segments);
     // SENDING THE DATA TO THE FFMPEG STDING USING PIPES
     size_t frame_count = duration*FPS;
     for (size_t i = 0; i < frame_count; i++) {
-        render_single_frame(nn, (float)i/frame_count);
+        float a = (float)i/frame_count;
+        float segment_len = 1.f/no_segments;
+        size_t segment_index = a/segment_len;
+        float segment_progress = a/segment_len - floorf(a/segment_len);
+        float b = segments[segment_index].start + segment_progress*(segments[segment_index].end - segments[segment_index].start);
+
+        render_single_frame(nn, sqrtf(b));
         size_t pixels_size = sizeof(*out_pixels)*out_width*out_height;
         int x = write(pipefd[WRITE_END], out_pixels, pixels_size);
         check (x < (int)pixels_size, "cant write %zu bytes only write %d", pixels_size, x);
@@ -226,6 +239,7 @@ void render_ffmpeg_video(NN nn, float duration, const char* out_video_path)
             printf("continued\n");
         }
     } while (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus));
+    printf("INFO: Generate %s video successfully\n", out_video_path);
 }
 
 int main(int argc, char** argv)
@@ -269,7 +283,6 @@ int main(int argc, char** argv)
             MAT_AT(t, i, 1) = (float)y/(img_height2-1);
             MAT_AT(t, i, 2) = 1.0f;
 
-            // HERE IS THE BUG THAT ME AND ALEXI FACE 
             MAT_AT(t, i, 3) = img_pixels2[y*img_width2+x]/255.f;
         }
     }
@@ -347,10 +360,8 @@ int main(int argc, char** argv)
         for (size_t j = 0; j < batch_per_frame && epoch < max_epoch && !paused; j++) {
             size_t size = batch_size;
 
-            // DETECT THE FINAL BATCH
             if ((batch_start+batch_size) >= t.rows) size = t.rows - batch_start;
 
-            // CONSTRUCT TI, TO BASED ON THE BATCH
             Mat batch_ti = {
                 .rows = size,
                 .cols = arch[0],
@@ -376,7 +387,6 @@ int main(int argc, char** argv)
                 mat_shuffle(t);
                 DA_APPEND(&costs, cost/batch_count);
                 epoch++;
-                // RESETING THE VARIABLES
                 cost = 0.f;
                 batch_start = 0;
             }
@@ -395,25 +405,21 @@ int main(int argc, char** argv)
         h = rh*9/16;
         y = rh/2-h/2;
 
-        // COST PLOT RENDERING
         gym_cost_render(costs, x, y, w, h);
         
         x += w;
 
-        // NURAL NETWORK RENDERING
         gym_nn_render(nn, x, y, w, h);
 
         x += w;
         float scale = h*8.f/WINDOW_HEIGHT;
 
-        // VERIFICATIOIN RENDERING
         verification_render(&img_prev, nn,
                             x, y, w, h, scale,
                             &scroll, &slider_clicked,
                             training_prev1, training_prev2, training_prev3,
                             original_prev1, original_prev2);
 
-        // STATUS LINE RENDERING
         status_line_render(h, rw, epoch, max_epoch, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
         EndDrawing();
     }
