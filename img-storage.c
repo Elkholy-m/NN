@@ -1,6 +1,8 @@
 #include <stdarg.h>
 #include <stdio.h>
+#include <sys/wait.h>
 #include <time.h>
+#include <unistd.h>
 
 #define HELPER_IMPLEMENTATION
 #include "helper.h"
@@ -11,9 +13,16 @@
 #define NN_ENABLE_GYM
 #include "nn.h"
 
-// TODO: THE SCREEN SHOT FUNCTION
-// TODO: THE SCREEN SHOT BUTTON (S)
-// TODO: THE SAVE  IMAGE FUNCTION
+#define STR2(s) #s
+#define STR(s) STR2(s)
+#define READ_END 0
+#define WRITE_END 1
+#define FPS 60
+
+#define out_width  512
+#define out_height 512
+uint32_t out_pixels[out_width*out_height];
+
 // TODO: GENERATE VIDEO USING FFMPEG
 
 size_t arch[] = {3, 14, 14, 11, 1};
@@ -123,14 +132,8 @@ void status_line_render(int h, int rw, size_t epoch, size_t max_epoch, float rat
     DrawText(buffer, rw/2-tw/2, 30, font_size, WHITE);
 }
 
-void nn_image_snapshot(NN nn, float scroll, const char* img_file_path)
+void render_single_frame(NN nn, float scroll)
 {
-    char out_file_path[256];
-    size_t out_width  = 512;
-    size_t out_height = 512;
-    uint8_t *out_pixels = malloc(sizeof(*out_pixels)*out_width*out_height);
-    assert(out_pixels != NULL);
-
     for (size_t y = 0; y < out_height; ++y) {
         for (size_t x = 0; x < out_width; ++x) {
             MAT_AT(NN_INPUT(nn), 0, 0) = (float)x/(out_width - 1);
@@ -138,15 +141,91 @@ void nn_image_snapshot(NN nn, float scroll, const char* img_file_path)
             MAT_AT(NN_INPUT(nn), 0, 2) = scroll;
 
             nn_forward(nn);
-            uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255.f;
+            float activation = MAT_AT(NN_OUTPUT(nn), 0, 0);
+            if (activation < 0) activation = 0;
+            if (activation > 1) activation = 1;
+            uint32_t bright = activation*255.f;
+            uint32_t pixel = 0xFF000000|bright|(bright<<8)|(bright<<16);
             out_pixels[y*out_width + x] = pixel;
         }
+    }   
+}
+
+void render_image_snapshot(NN nn, float scroll, const char* img_file_path)
+{
+    char out_file_path[256];
+    assert(out_pixels != NULL);
+    render_single_frame(nn, scroll);
+    snprintf(out_file_path, sizeof(out_file_path), "upscaled/%s", get_file_name(img_file_path));
+    check(!stbi_write_png(out_file_path, out_width, out_height, 4, out_pixels, out_width*sizeof(*out_pixels)),
+          "could not save image %s\n", out_file_path);
+    printf("INFO: Generated %s\n", out_file_path);
+}
+
+void render_ffmpeg_video(NN nn, float duration, const char* out_video_path)
+{
+    int wstatus, res;
+    pid_t cpid, wpid;
+    int pipefd[2];
+    res = pipe(pipefd);
+    check(res < 0, "pipe2() failure");
+
+    cpid = fork();
+    check(cpid < 0, "fork() failure");
+
+    if (cpid == 0) {
+        close(pipefd[WRITE_END]);
+        res = dup2(pipefd[READ_END], STDIN_FILENO);
+        check(res < 0, "dup2() failure");
+
+        res = execlp("ffmpeg",
+                     "ffmpeg",
+                     "-loglevel", "verbose",
+                     "-y",
+                     "-f", "rawvideo",
+                     "-pix_fmt", "rgba",
+                     "-s", STR(out_width) "x" STR(out_height),
+                     "-r", STR(FPS),
+                     "-an",
+                     "-i", "-",
+                     "-c:v", "libx264",
+                     out_video_path,
+                     NULL);
+
+        check(res < 0, "execlp() failure");
+        close(pipefd[READ_END]);
+
+        // THIS CODE MUST BE UNREACHABLE
+        exit(EXIT_FAILURE);
     }
 
-    snprintf(out_file_path, sizeof(out_file_path), "upscaled/%s", get_file_name(img_file_path));
-    check(!stbi_write_png(out_file_path, out_width, out_height, 1, out_pixels, out_width*sizeof(*out_pixels)),
-          "ERROR: could not save image %s\n", out_file_path);
-    printf("INFO: Generated %s\n", out_file_path);
+    close(pipefd[READ_END]);
+    // SENDING THE DATA TO THE FFMPEG STDING USING PIPES
+    size_t frame_count = duration*FPS;
+    for (size_t i = 0; i < frame_count; i++) {
+        render_single_frame(nn, (float)i/frame_count);
+        size_t pixels_size = sizeof(*out_pixels)*out_width*out_height;
+        int x = write(pipefd[WRITE_END], out_pixels, pixels_size);
+        check (x < (int)pixels_size, "cant write %zu bytes only write %d", pixels_size, x);
+    }
+
+    close(pipefd[WRITE_END]);
+
+    // INSPECTION OF THE CHILD PROCESS
+    do {
+        wpid = waitpid(cpid, &wstatus, WUNTRACED | WCONTINUED);
+        check(wpid < 0, "waitpid() failure");
+
+        if (WIFEXITED(wstatus)) {
+            printf("exited,                     status=%d\n", WEXITSTATUS(wstatus));
+        } else if (WIFSIGNALED(wstatus)) {
+            printf("killed       by       signal       %d\n", WTERMSIG(wstatus));
+        } else if (WIFSTOPPED(wstatus)) {
+            printf("stopped       by      signal       %d\n", WSTOPSIG(wstatus));
+        } else if (WIFCONTINUED(wstatus)) {
+            printf("continued\n");
+        }
+    } while (!WIFEXITED(wstatus) && !WIFSIGNALED(wstatus));
 }
 
 int main(int argc, char** argv)
@@ -253,7 +332,12 @@ int main(int argc, char** argv)
 
             check(strftime(buffer, sizeof(buffer), "%Y-%m-%d_%H-%M-%S.png", now) < 1,
                   "strftime() ==> Couldn't format the time");
-            nn_image_snapshot(nn, scroll, buffer);
+            render_image_snapshot(nn, scroll, buffer);
+        }
+
+        // RENDRING TRANSITION VIDEO USING FFMPEG
+        if (IsKeyPressed(KEY_V)) {
+            render_ffmpeg_video(nn, 5, "transition.mp4");
         }
 
         // PAUSE THE LEARNING
