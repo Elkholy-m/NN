@@ -3,7 +3,15 @@
 #define ARRAY_LEN(arr) (sizeof(arr)/sizeof(arr[0]))
 #define MAT_AT(mat, i, j) (mat).es[(i) * (mat).stride + (j)]
 #define MAT_PRINT(mat) mat_print(mat, #mat, 0)
-#define NN_ACT ACT_TANH
+
+/* #define TRADITIONAL_APPROACH */
+#ifndef NN_ACT
+#define NN_ACT ACT_SIG
+#endif //NN_ACT
+
+#ifndef NN_RELU_PARAM
+#define NN_RELU_PARAM 0.005f
+#endif //NN_RELU_PARAM
 
 #include <math.h>
 #include <stddef.h>
@@ -32,6 +40,7 @@ typedef enum {
     ACT_SIG,
     ACT_RELU,
     ACT_TANH,
+    ACT_SIN,
 } Act;
 
 typedef struct {
@@ -135,9 +144,8 @@ float sigmoidf(float x) {
     return 1.f / (1.f + expf(-x));
 }
 
-
 float reluf(float x) {
-    return (x > 0)*x;
+    return (x > 0) ? x : x*NN_RELU_PARAM;
 }
 
 Mat mat_alloc(size_t rows, size_t cols) {
@@ -296,6 +304,9 @@ void mat_act(Mat mat) {
             case ACT_TANH:
                 MAT_AT(mat, i, j) = tanhf(MAT_AT(mat, i, j));
                 break;
+            case ACT_SIN:
+                MAT_AT(mat, i, j) = sinf(MAT_AT(mat, i, j));
+                break;
             default:
                 NN_ASSERT(0 && "UNREACHABLE");
                 break;
@@ -446,7 +457,11 @@ void nn_backprop(NN nn, NN g, Mat ti, Mat to) {
         }
 
         for (size_t j = 0; j < to.cols; j++) {
+#ifdef TRADITIONAL_APPROACH
+            MAT_AT(NN_OUTPUT(g), 0, j) = 2*MAT_AT(NN_OUTPUT(nn), 0, j) - MAT_AT(to, i, j);
+#else
             MAT_AT(NN_OUTPUT(g), 0, j) = MAT_AT(NN_OUTPUT(nn), 0, j) - MAT_AT(to, i, j);
+#endif //TRADITIONAL_APPROACH
         }
 
         // THIS  IS THE BACK PROPAGATION OPERATION
@@ -460,22 +475,31 @@ void nn_backprop(NN nn, NN g, Mat ti, Mat to) {
                     q = a*(1 - a);
                     break;
                 case ACT_RELU:
-                    q = (a >= 0);
+                    q = (a >= 0) ? 1 : NN_RELU_PARAM;
                     break;
                 case ACT_TANH:
                     q = 1 - a*a;
+                    break;
+                case ACT_SIN:
+                    q = cosf(asinf(a));
                     break;
                 default:
                     NN_ASSERT(0 && "UNREACHABLE");
                     break;
                 };
 
-                MAT_AT(g.bs[l-1], 0, j) += 2*da*q;
+#ifdef TRADITIONAL_APPROACH
+                float s = 1;
+#else
+                float s = 2;
+#endif //TRADITIONAL_APPROACH
+
+                MAT_AT(g.bs[l-1], 0, j) += s*da*q;
                 for (size_t k = 0; k < nn.as[l-1].cols; k++) {
                     float pa = MAT_AT(nn.as[l-1], 0, k);
                     float w  = MAT_AT(nn.ws[l-1], k, j);
-                    MAT_AT(g.ws[l-1], k, j) += 2*da*q*pa;
-                    MAT_AT(g.as[l-1], 0, k) += 2*da*q*w;
+                    MAT_AT(g.ws[l-1], k, j) += s*da*q*pa;
+                    MAT_AT(g.as[l-1], 0, k) += s*da*q*w;
                 }
             }
         }
