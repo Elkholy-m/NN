@@ -3,6 +3,7 @@
 #define ARRAY_LEN(arr) (sizeof(arr)/sizeof(arr[0]))
 #define MAT_AT(mat, i, j) (mat).es[(i) * (mat).stride + (j)]
 #define MAT_PRINT(mat) mat_print(mat, #mat, 0)
+#define NN_ACT ACT_TANH
 
 #include <math.h>
 #include <stddef.h>
@@ -24,8 +25,15 @@
 
 float rand_float();
 float sigmoidf(float x);
+float reluf(float x);
 
 #define COORDINATE(i, j) (Coord){.x = (i), .y = (j)}
+typedef enum {
+    ACT_SIG,
+    ACT_RELU,
+    ACT_TANH,
+} Act;
+
 typedef struct {
     size_t x;
     size_t y;
@@ -49,7 +57,7 @@ Mat mat_sub(Mat mat, Coord start, Coord end);
 void mat_copy(Mat dest, Mat src);
 void mat_rand(Mat mat, float min, float max);
 void mat_fill(Mat mat, float x);
-void mat_sig(Mat mat);
+void mat_act(Mat mat);
 void mat_print(Mat mat, const char* name, size_t padding);
 
 #define NN_INPUT(nn)  (nn).as[0]
@@ -125,6 +133,11 @@ float rand_float() {
 
 float sigmoidf(float x) {
     return 1.f / (1.f + expf(-x));
+}
+
+
+float reluf(float x) {
+    return (x > 0)*x;
 }
 
 Mat mat_alloc(size_t rows, size_t cols) {
@@ -270,10 +283,23 @@ void mat_fill(Mat mat, float x) {
     }
 }
 
-void mat_sig(Mat mat) {
+void mat_act(Mat mat) {
     for (size_t i = 0; i < mat.rows; i++) {
         for (size_t j = 0; j < mat.cols; j++) {
-            MAT_AT(mat, i, j) = sigmoidf(MAT_AT(mat, i, j));
+            switch(NN_ACT) {
+            case ACT_SIG:
+                MAT_AT(mat, i, j) = sigmoidf(MAT_AT(mat, i, j));
+                break;
+            case ACT_RELU:
+                MAT_AT(mat, i, j) = reluf(MAT_AT(mat, i, j));
+                break;
+            case ACT_TANH:
+                MAT_AT(mat, i, j) = tanhf(MAT_AT(mat, i, j));
+                break;
+            default:
+                NN_ASSERT(0 && "UNREACHABLE");
+                break;
+            }
         }
     }
 }
@@ -333,7 +359,7 @@ void nn_forward(NN nn) {
     for (size_t i = 0; i < nn.count; i++) {
         mat_dot(nn.as[i + 1], nn.as[i], nn.ws[i]);
         mat_sum(nn.as[i + 1], nn.bs[i]);
-        mat_sig(nn.as[i + 1]);
+        mat_act(nn.as[i + 1]);
     }
 }
 
@@ -428,12 +454,28 @@ void nn_backprop(NN nn, NN g, Mat ti, Mat to) {
             for (size_t j = 0; j < nn.as[l].cols; j++) {
                 float a = MAT_AT(nn.as[l], 0, j);
                 float da = MAT_AT(g.as[l], 0, j);
-                MAT_AT(g.bs[l-1], 0, j) += 2*da*a*(1 - a);
+                float q;
+                switch(NN_ACT) {
+                case ACT_SIG:
+                    q = a*(1 - a);
+                    break;
+                case ACT_RELU:
+                    q = (a >= 0);
+                    break;
+                case ACT_TANH:
+                    q = 1 - a*a;
+                    break;
+                default:
+                    NN_ASSERT(0 && "UNREACHABLE");
+                    break;
+                };
+
+                MAT_AT(g.bs[l-1], 0, j) += 2*da*q;
                 for (size_t k = 0; k < nn.as[l-1].cols; k++) {
                     float pa = MAT_AT(nn.as[l-1], 0, k);
                     float w  = MAT_AT(nn.ws[l-1], k, j);
-                    MAT_AT(g.ws[l-1], k, j) += 2*da*a*(1 - a)*pa;
-                    MAT_AT(g.as[l-1], 0, k) += 2*da*a*(1 - a)*w;
+                    MAT_AT(g.ws[l-1], k, j) += 2*da*q*pa;
+                    MAT_AT(g.as[l-1], 0, k) += 2*da*q*w;
                 }
             }
         }
@@ -461,9 +503,7 @@ void nn_learn(NN nn, NN g, float rate) {
                 MAT_AT(nn.ws[i], j, k) -= rate*MAT_AT(g.ws[i], j, k);
             }
         }
-    }
 
-    for (size_t i = 0; i < nn.count; i++) {
         for (size_t j = 0; j < nn.bs[i].rows; j++) {
             for (size_t k = 0; k < nn.bs[i].cols; k++) {
                 MAT_AT(nn.bs[i], j, k) -= rate*MAT_AT(g.bs[i], j, k);

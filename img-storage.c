@@ -44,21 +44,18 @@ void verify_img_construct(Image* img_prev, NN nn, float scroll)
             MAT_AT(NN_INPUT(nn), 0, 2) = scroll;
 
             nn_forward(nn);
-            uint8_t pixel = MAT_AT(NN_OUTPUT(nn), 0, 0)*255;
+            float activation = MAT_AT(NN_OUTPUT(nn), 0, 0);
+            if (activation < 0) activation = 0;
+            if (activation > 1) activation = 1;
+            uint8_t pixel = activation*255;
             ImageDrawPixel(img_prev, x, y, (Color) {pixel, pixel, pixel, 255});
         }
     }
 }
 
-void slider_render(int x, int y, int w, int h, float* scroll, float scale, bool* slider_clicked, Texture2D training_prev)
+void slider_render(Vector2 rect_corner, Vector2 rect_size, Vector2 slider_center, float slider_raduis, bool* slider_clicked, float* scroll)
 {
-        Vector2 rect_corner = (Vector2) {x+w/2-training_prev.width*scale, y+h/2+training_prev.height*1.70f*scale};
-        Vector2 rect_size   = (Vector2) {2*training_prev.width*scale, h*0.007};
         DrawRectangleV(rect_corner, rect_size, RAYWHITE);
-        Vector2 slider_center = (Vector2) {
-            (*scroll*2*training_prev.width*scale)+ x+w/2-training_prev.width*scale,
-            y+h/2+training_prev.height*1.70f*scale};
-        float slider_raduis = h*((float)19/WINDOW_HEIGHT);
         DrawCircleV(slider_center, slider_raduis, MAROON);
 
         if (*slider_clicked) {
@@ -84,7 +81,9 @@ void slider_render(int x, int y, int w, int h, float* scroll, float scale, bool*
 
 void verification_render(Image* img_prev, NN nn,
                          int x, int y, int w, int h,
-                         float scale, float* scroll, bool* slider_clicked,
+                         float scale,
+                         float* scroll1, bool* slider_clicked1,
+                         float* scroll2, bool* slider_clicked2,
                          Texture2D training_prev1, Texture2D training_prev2, Texture2D training_prev3,
                          Texture2D original_prev1, Texture2D original_prev2)
 {
@@ -109,20 +108,38 @@ void verification_render(Image* img_prev, NN nn,
     DrawTextureEx(original_prev2, texture_position, 0, scale, RAYWHITE);
 
     // DRAWING THE IN BETWEEN TEXTURE 
-    verify_img_construct(img_prev, nn, *scroll);
+    verify_img_construct(img_prev, nn, *scroll1);
     texture_position = (Vector2) {x+w/2-training_prev3.width/2*scale, y+h/2+training_prev3.height*0.5f*scale};
     UpdateTexture(training_prev3, img_prev->data);
     DrawTextureEx(training_prev3, texture_position, 0, scale, RAYWHITE);
 
-    // RENDERING THE SLIDER
-    slider_render(x, y, w, h, scroll, scale, slider_clicked, training_prev1);
+    // RENDERING THE TOP SLIDER
+    Vector2 rect_corner = (Vector2) {x+w/2-training_prev1.width*scale, y+h/2+training_prev1.height*2.0f*scale};
+    Vector2 rect_size   = (Vector2) {2*training_prev1.width*scale, h*0.007};
+    Vector2 slider_center = (Vector2) {
+        (*scroll2*2*training_prev1.width*scale)+ x+w/2-training_prev1.width*scale,
+        y+h/2+training_prev1.height*2.0f*scale};
+    float slider_raduis = h*((float)19/WINDOW_HEIGHT);
+    slider_render(rect_corner, rect_size, slider_center, slider_raduis, slider_clicked2, scroll2);
+    float font_size = h*(35.0f/WINDOW_HEIGHT);
+    DrawText("Rate:", rect_corner.x-0.35*h, rect_corner.y-rect_size.y,  font_size, WHITE);
+
+    // RENDERING THE BOTTOM SLIDER
+    rect_corner = (Vector2) {x+w/2-training_prev1.width*scale, y+h/2+training_prev1.height*1.70f*scale};
+    rect_size   = (Vector2) {2*training_prev1.width*scale, h*0.007};
+    slider_center = (Vector2) {
+        (*scroll1*2*training_prev1.width*scale)+ x+w/2-training_prev1.width*scale,
+        y+h/2+training_prev1.height*1.70f*scale};
+    slider_raduis = h*((float)19/WINDOW_HEIGHT);
+    slider_render(rect_corner, rect_size, slider_center, slider_raduis, slider_clicked1, scroll1);
+    DrawText("Interpolation:", rect_corner.x-0.35*h, rect_corner.y-rect_size.y,  font_size, WHITE);
 }
 
 void status_line_render(int h, int rw, size_t epoch, size_t max_epoch, float rate, float cost)
 {
     char buffer[256];
     snprintf(buffer, sizeof(buffer),
-             "Epoch: %zu/%zu\t\tRate: %.2f\t\tCost: %f",
+             "Epoch: %zu/%zu\t\tRate: %.5f\t\tCost: %f",
              epoch, max_epoch, rate, cost);
         
     float font_size = h*(50.0f/WINDOW_HEIGHT);
@@ -289,7 +306,6 @@ int main(int argc, char** argv)
 
     NN nn = nn_alloc(arch, ARRAY_LEN(arch));
     NN g  = nn_alloc(arch, ARRAY_LEN(arch));
-    float rate = 1;
     size_t epoch = 0;
     size_t max_epoch = 100000;
     Costs costs = {0};
@@ -301,8 +317,11 @@ int main(int argc, char** argv)
     size_t batch_start = 0;
     float cost = 0.f;
 
-    float scroll = 0.5f;
-    bool slider_clicked = false;
+    float scroll1 = 0.5f;
+    // this is the scroll2;
+    float rate = 1;
+    bool slider_clicked1 = false;
+    bool slider_clicked2 = false;
 
     srand(time(0));
     nn_rand(nn, -1, 1);
@@ -345,7 +364,7 @@ int main(int argc, char** argv)
 
             check(strftime(buffer, sizeof(buffer), "%Y-%m-%d_%H-%M-%S.png", now) < 1,
                   "strftime() ==> Couldn't format the time");
-            render_image_snapshot(nn, scroll, buffer);
+            render_image_snapshot(nn, scroll1, buffer);
         }
 
         // RENDRING TRANSITION VIDEO USING FFMPEG
@@ -416,7 +435,8 @@ int main(int argc, char** argv)
 
         verification_render(&img_prev, nn,
                             x, y, w, h, scale,
-                            &scroll, &slider_clicked,
+                            &scroll1, &slider_clicked1,
+                            &rate, &slider_clicked2,
                             training_prev1, training_prev2, training_prev3,
                             original_prev1, original_prev2);
 
