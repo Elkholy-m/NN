@@ -107,10 +107,10 @@ void nn_zero(NN nn);
 #include <raylib.h>
 #include <raymath.h>
 
-#define DA_INIT_CAPACITY 256
 #define BORDER_VPAD 50
 #define BORDER_HPAD 50
 
+#define DA_INIT_CAPACITY 256
 #define DA_APPEND(da, item)                                                            \
     do {                                                                               \
         if ((da)->count >= (da)->capacity) {                                           \
