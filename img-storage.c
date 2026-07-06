@@ -312,10 +312,8 @@ int main(int argc, char** argv)
     bool paused = true;
 
     size_t batch_size = 28;
-    size_t batch_count = (t.rows+batch_size-1)/batch_size;
     size_t batch_per_frame = 103;
-    size_t batch_start = 0;
-    float cost = 0.f;
+    Batch batch = {0};
 
     float scroll1 = 0.5f;
     // this is the scroll2;
@@ -361,7 +359,6 @@ int main(int argc, char** argv)
             struct tm* now = localtime(&sec);
             char buffer[256];
 
-
             check(strftime(buffer, sizeof(buffer), "%Y-%m-%d_%H-%M-%S.png", now) < 1,
                   "strftime() ==> Couldn't format the time");
             render_image_snapshot(nn, scroll1, buffer);
@@ -377,37 +374,12 @@ int main(int argc, char** argv)
 
         // LEARNING PROCESS
         for (size_t j = 0; j < batch_per_frame && epoch < max_epoch && !paused; j++) {
-            size_t size = batch_size;
-
-            if ((batch_start+batch_size) >= t.rows) size = t.rows - batch_start;
-
-            Mat batch_ti = {
-                .rows = size,
-                .cols = arch[0],
-                .stride = t.stride,
-                .es = &MAT_AT(t, batch_start, 0),
-            };
-
-            Mat batch_to = {
-                .rows = size,
-                .cols = arch[ARRAY_LEN(arch)-1],
-                .stride = t.stride,
-                .es = &MAT_AT(t, batch_start, batch_ti.cols),
-            };
-
-            // LEARNING USING STOCHASTIC GREDIENT DESCENT
-            nn_backprop(nn, g, batch_ti, batch_to);
-            nn_learn(nn, g, rate);
-            cost += nn_cost(nn, batch_ti, batch_to);
-
-            batch_start += batch_size;
-
-            if ((batch_start) >= t.rows) {
+            nn_batch(&batch, nn, g, t, rate, batch_size);
+           
+            if (batch.end) {
+                DA_APPEND(&costs, batch.cost);
                 mat_shuffle(t);
-                DA_APPEND(&costs, cost/batch_count);
                 epoch++;
-                cost = 0.f;
-                batch_start = 0;
             }
         }    
 

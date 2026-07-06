@@ -80,6 +80,12 @@ typedef struct {
     Mat* as; // activations => count + 1
 } NN;
 
+typedef struct { 
+    size_t start;
+    float cost;
+    bool end;
+} Batch;
+
 NN nn_alloc(size_t* arch, size_t arch_count);
 void nn_print(NN nn, const char* name);
 void nn_rand(NN nn, float low, float high);
@@ -89,6 +95,7 @@ void nn_finite_diff(NN nn, NN g, Mat ti, Mat to, float eps);
 void nn_backprop(NN nn, NN g, Mat ti, Mat to);
 void nn_learn(NN nn, NN g, float rate);
 void nn_zero(NN nn);
+void nn_batch(Batch* batch, NN nn, NN g, Mat t, float rate, size_t batch_size);
 
 #ifdef NN_ENABLE_GYM
 
@@ -543,6 +550,45 @@ void nn_zero(NN nn) {
         mat_fill(nn.as[i], 0);
     }
     mat_fill(nn.as[nn.count], 0);
+}
+
+// batch size, t training data, rate, epoch, costs
+void nn_batch(Batch* batch, NN nn, NN g, Mat t, float rate, size_t batch_size)
+{
+    if (batch->end){
+        batch->end = false;
+        batch->start = 0;       
+        batch->cost = 0.f;       
+    }
+
+    size_t size = batch_size;
+    
+    if ((batch->start+batch_size) >= t.rows) size = t.rows - batch->start;
+
+    Mat batch_ti = {
+        .rows = size,
+        .cols = NN_INPUT(nn).cols,
+        .stride = t.stride,
+        .es = &MAT_AT(t, batch->start, 0),
+    };
+
+    Mat batch_to = {
+        .rows = size,
+        .cols = NN_OUTPUT(nn).cols,
+        .stride = t.stride,
+        .es = &MAT_AT(t, batch->start, batch_ti.cols),
+    };
+
+
+    nn_backprop(nn, g, batch_ti, batch_to);
+    nn_learn(nn, g, rate);
+    batch->cost += nn_cost(nn, batch_ti, batch_to);
+    batch->start += batch_size;
+
+    if ((batch->start) >= t.rows) {
+        batch->cost /= (t.rows + batch_size - 1)/batch_size;
+        batch->end = true;
+    }
 }
 
 #ifdef NN_ENABLE_GYM
