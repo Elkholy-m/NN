@@ -23,7 +23,7 @@
 #define out_height 256
 uint32_t out_pixels[out_width*out_height];
 
-size_t arch[] = {3, 14, 14, 11, 1};
+size_t arch[] = {3, 14, 14, 14, 1};
 
 void original_img_construct(Image* img_prev, uint8_t* pixels)
 {
@@ -309,6 +309,8 @@ int main(int argc, char** argv)
     size_t epoch = 0;
     size_t max_epoch = 100000;
     Costs costs = {0};
+    LayoutStack ls = {0};
+    LayoutRect r = {0};
     bool paused = true;
 
     size_t batch_size = 28;
@@ -365,9 +367,8 @@ int main(int argc, char** argv)
         }
 
         // RENDRING TRANSITION VIDEO USING FFMPEG
-        if (IsKeyPressed(KEY_V)) {
-            render_ffmpeg_video(nn, 5, "transition.mp4");
-        }
+        if (IsKeyPressed(KEY_V)) render_ffmpeg_video(nn, 5, "transition.mp4");
+
 
         // PAUSE THE LEARNING
         if (IsKeyPressed(KEY_SPACE)) paused = !paused;
@@ -386,37 +387,33 @@ int main(int argc, char** argv)
         Color background_color = {.a =0xFF, .b =0x18, .g =0x18, .r =0x18};
         BeginDrawing();
         ClearBackground(background_color);
-        int x, y, w, h;
 
         int rw = GetRenderWidth();
         int rh = GetRenderHeight();
 
-        x = 0;
-        w = rw/3;
-        h = rh*9/16;
-        y = rh/2-h/2;
+        size_t frame = rh*0.25;
+        size_t gap = rh*0.03;
 
-        gym_cost_render(costs, x, y, w, h);
-        
-        x += w;
+        layout_stack_push(&ls, rect_constructor(0, frame, rw, rh-2*frame), LO_HORZ, 3, gap);
 
-        gym_nn_render(nn, x, y, w, h);
+        gym_cost_render(costs, layout_stack_slot(&ls));
+        gym_nn_render(nn, layout_stack_slot(&ls));
 
-        x += w;
-        float scale = h*8.f/WINDOW_HEIGHT;
+        r = layout_stack_slot(&ls);
+        float scale = r.h*8.f/WINDOW_HEIGHT;
 
         verification_render(&img_prev, nn,
-                            x, y, w, h, scale,
+                            r.x, r.y, r.w, r.h, scale,
                             &scroll1, &slider_clicked1,
                             &rate, &slider_clicked2,
                             training_prev1, training_prev2, training_prev3,
                             original_prev1, original_prev2);
 
-        status_line_render(h, rw, epoch, max_epoch, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
+        status_line_render(r.h, rw, epoch, max_epoch, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
+        layout_stack_pop(&ls);
         EndDrawing();
     }
-
-    TakeScreenshot("screenshot.png");
+    
     CloseWindow();
     return 0;
 }
