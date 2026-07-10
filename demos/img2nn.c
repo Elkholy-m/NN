@@ -53,32 +53,6 @@ void verify_img_construct(Image* img_prev, NN nn, float scroll)
     }
 }
 
-void slider_render(Vector2 rect_corner, Vector2 rect_size, Vector2 slider_center, float slider_raduis, bool* slider_clicked, float* scroll)
-{
-        DrawRectangleV(rect_corner, rect_size, RAYWHITE);
-        DrawCircleV(slider_center, slider_raduis, MAROON);
-
-        if (*slider_clicked) {
-            float x = GetMousePosition().x;
-
-            if (x <= rect_corner.x) x = rect_corner.x;
-            if (x >= rect_corner.x+rect_size.x) x =rect_corner.x+rect_size.x;
-
-            *scroll = (x - rect_corner.x) / rect_size.x;
-        }
-
-        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-            float dist = Vector2Distance(GetMousePosition(), slider_center);
-            if (dist <= slider_raduis) {
-                *slider_clicked = true;
-            }
-        }
-
-        if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
-            *slider_clicked = false;
-        }
-}
-
 void verification_render(Image* img_prev, NN nn,
                          int x, int y, int w, int h,
                          float scale,
@@ -120,7 +94,7 @@ void verification_render(Image* img_prev, NN nn,
         (*scroll2*2*training_prev1.width*scale)+ x+w/2-training_prev1.width*scale,
         y+h/2+training_prev1.height*2.0f*scale};
     float slider_raduis = h*((float)19/WINDOW_HEIGHT);
-    slider_render(rect_corner, rect_size, slider_center, slider_raduis, slider_clicked2, scroll2);
+    gym_slider_render(rect_corner, rect_size, slider_center, slider_raduis, slider_clicked2, scroll2);
     float font_size = h*(35.0f/WINDOW_HEIGHT);
     DrawText("Rate:", rect_corner.x-0.35*h, rect_corner.y-rect_size.y,  font_size, WHITE);
 
@@ -131,20 +105,8 @@ void verification_render(Image* img_prev, NN nn,
         (*scroll1*2*training_prev1.width*scale)+ x+w/2-training_prev1.width*scale,
         y+h/2+training_prev1.height*1.70f*scale};
     slider_raduis = h*((float)19/WINDOW_HEIGHT);
-    slider_render(rect_corner, rect_size, slider_center, slider_raduis, slider_clicked1, scroll1);
+    gym_slider_render(rect_corner, rect_size, slider_center, slider_raduis, slider_clicked1, scroll1);
     DrawText("Interpolation:", rect_corner.x-0.35*h, rect_corner.y-rect_size.y,  font_size, WHITE);
-}
-
-void status_line_render(int h, int rw, size_t epoch, size_t max_epoch, float rate, float cost)
-{
-    char buffer[256];
-    snprintf(buffer, sizeof(buffer),
-             "Epoch: %zu/%zu\t\tRate: %.5f\t\tCost: %f",
-             epoch, max_epoch, rate, cost);
-        
-    float font_size = h*(50.0f/WINDOW_HEIGHT);
-    int tw =  MeasureText(buffer, font_size);
-    DrawText(buffer, rw/2-tw/2, 30, font_size, WHITE);
 }
 
 void render_single_frame(NN nn, float scroll)
@@ -327,7 +289,7 @@ int main(int argc, char** argv)
     nn_rand(nn, -1, 1);
 
     SetConfigFlags(FLAG_WINDOW_RESIZABLE);
-    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "IMAGE-STORAGE");;
+    InitWindow(WINDOW_WIDTH, WINDOW_HEIGHT, "IMAGE_NN");;
     SetTargetFPS(60);
 
     // LET THIS ASSERTION FOR NOW
@@ -409,9 +371,11 @@ int main(int argc, char** argv)
                             training_prev1, training_prev2, training_prev3,
                             original_prev1, original_prev2);
 
-        status_line_render(r.h, rw, epoch, max_epoch, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
+        gym_status_line_render(r.h, rw, epoch, max_epoch, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
         layout_stack_pop(&ls);
         EndDrawing();
+
+        assert(ls.count == 0);
     }
     
     CloseWindow();

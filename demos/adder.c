@@ -9,22 +9,11 @@
 #define BITS 4
 size_t arch[] = {2*BITS, 4*BITS, BITS+1};
 
-void status_line_render(int h, int rw, size_t epoch, size_t max_epoch, float rate, float cost)
-{
-    char buffer[256];
-    snprintf(buffer, sizeof(buffer),
-             "Epoch: %zu/%zu\t\tRate: %.5f\t\tCost: %f",
-             epoch, max_epoch, rate, cost);
-        
-    float font_size = h*(50.0f/WINDOW_HEIGHT);
-    int tw =  MeasureText(buffer, font_size);
-    DrawText(buffer, rw/2-tw/2, 30, font_size, WHITE);
-}
-
 int main() {
     // PREPARE THE TRAINING SET FOR ADDER
     int n = (1<<BITS);
     int rows = n*n;
+    int maxwidth = (n == 0) ? 1 : (int)log10(n) + 1;
     Mat ti = mat_alloc(rows, 2*BITS);
     Mat to = mat_alloc(rows, BITS+1);
     for (int i = 0; i < rows; i++) {
@@ -93,13 +82,15 @@ int main() {
             float fontSize = r.h*(20.0f/WINDOW_HEIGHT);
             char buffer[256];
             float spacing = r.h*0.05;
+            float cntrx = r.w/2-(n+1)*spacing/2;
+            float cntry = r.h/2-(n+1)*spacing/2;
 
             for (int x = 0; x < n; x++) {
-                snprintf(buffer, sizeof(buffer), "%2d\t", x);
-                DrawText(buffer, r.x+(x*spacing), r.y-spacing, fontSize, WHITE);
+                snprintf(buffer, sizeof(buffer), "%*d\t", maxwidth, x);
+                DrawText(buffer, r.x+(x*spacing)+cntrx, r.y-spacing+cntry, fontSize, WHITE);
 
-                snprintf(buffer, sizeof(buffer), "%2d\t", x);
-                DrawText(buffer, r.x-spacing, r.y+(x*spacing), fontSize, WHITE);
+                snprintf(buffer, sizeof(buffer), "%*d\t", maxwidth, x);
+                DrawText(buffer, r.x-spacing+cntrx, r.y+(x*spacing)+cntry, fontSize, WHITE);
 
                 for (int y = 0; y < n; y++) {
                     int z = x + y;
@@ -115,7 +106,7 @@ int main() {
                     }
 
                     int c = MAT_AT(NN_OUTPUT(nn), 0, BITS)>0.5f;
-                    if (c == 1) DrawRectangle(r.x+(x*spacing), r.y+(y*spacing), ceilf(spacing), ceilf(spacing), DARKGRAY);
+                    if (c == 1) DrawRectangle(r.x+(x*spacing)+cntrx, r.y+(y*spacing)+cntry, ceilf(spacing), ceilf(spacing), DARKGRAY);
 
                     // COMPARE THE MODEL FORWARDING WITH THE EXPECTED
                     Color tr = GREEN;
@@ -123,12 +114,12 @@ int main() {
                     int ec = z >= n;
                     if (a != ea || ec != c) tr = RED;
 
-                    snprintf(buffer, sizeof(buffer), "%2d\t", a);
-                    DrawText(buffer, r.x+(x*spacing), r.y+(y*spacing), fontSize, tr);
+                    snprintf(buffer, sizeof(buffer), "%*d\t", maxwidth, a);
+                    DrawText(buffer, r.x+(x*spacing)+cntrx, r.y+(y*spacing)+cntry, fontSize, tr);
                 }
             }
 
-            status_line_render(r.h, rw, epoch, max_epochs, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
+            gym_status_line_render(r.h, rw, epoch, max_epochs, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
         layout_stack_pop(&ls);
         EndDrawing();
 

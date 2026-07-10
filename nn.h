@@ -174,6 +174,8 @@ void widget(LayoutRect rect, Color c);
 
 void gym_nn_render(NN nn, LayoutRect r);
 void gym_cost_render(Costs costs, LayoutRect r);
+void gym_status_line_render(int h, int rw, size_t epoch, size_t max_epoch, float rate, float cost);
+void gym_slider_render(Vector2 rect_corner, Vector2 rect_size, Vector2 slider_center, float slider_raduis, bool* slider_clicked, float* scroll);
 #endif // !NN_ENABLE_GYM
 
 #endif // !NN_H_
@@ -817,6 +819,45 @@ void gym_cost_render(Costs costs, LayoutRect r)
         float thick = r.h*(5.0f/WINDOW_HEIGHT);
         DrawLineEx((Vector2) {x1, y1}, (Vector2) {x2, y2}, thick, MAROON);
     }
+}
+
+void gym_status_line_render(int h, int rw, size_t epoch, size_t max_epoch, float rate, float cost)
+{
+    char buffer[256];
+    snprintf(buffer, sizeof(buffer),
+    "Epoch: %zu/%zu\t\tRate: %.5f\t\tCost: %f",
+    epoch, max_epoch, rate, cost);
+    
+    float font_size = h*(50.0f/WINDOW_HEIGHT);
+    int tw =  MeasureText(buffer, font_size);
+    DrawText(buffer, rw/2-tw/2, 30, font_size, WHITE);
+    
+}
+
+void gym_slider_render(Vector2 rect_corner, Vector2 rect_size, Vector2 slider_center, float slider_raduis, bool* slider_clicked, float* scroll)
+{
+        DrawRectangleV(rect_corner, rect_size, RAYWHITE);
+        DrawCircleV(slider_center, slider_raduis, MAROON);
+
+        if (*slider_clicked) {
+            float x = GetMousePosition().x;
+
+            if (x <= rect_corner.x) x = rect_corner.x;
+            if (x >= rect_corner.x+rect_size.x) x =rect_corner.x+rect_size.x;
+
+            *scroll = (x - rect_corner.x) / rect_size.x;
+        }
+
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+            float dist = Vector2Distance(GetMousePosition(), slider_center);
+            if (dist <= slider_raduis) {
+                *slider_clicked = true;
+            }
+        }
+
+        if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
+            *slider_clicked = false;
+        }
 }
 
 #endif // !NN_ENABLE_GYM

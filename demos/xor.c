@@ -23,18 +23,6 @@ float td[] = {
 
 Mat xor = { .rows = 4, .cols = 3, .stride = 3, .es = td, };
 
-void status_line_render(int h, int rw, size_t epoch, size_t max_epoch, float rate, float cost)
-{
-    char buffer[256];
-    snprintf(buffer, sizeof(buffer),
-             "Epoch: %zu/%zu\t\tRate: %.5f\t\tCost: %f",
-             epoch, max_epoch, rate, cost);
-        
-    float font_size = h*(50.0f/WINDOW_HEIGHT);
-    int tw =  MeasureText(buffer, font_size);
-    DrawText(buffer, rw/2-tw/2, 30, font_size, WHITE);
-}
-
 int main()
 {
     Mat ti = mat_sub(xor, COORDINATE(0, 0), COORDINATE(3, 1));
@@ -63,7 +51,7 @@ int main()
         if(IsKeyPressed(KEY_R)) {
             paused = true;
             epoch = 0;
-            nn_rand(nn, 0, 1);
+            nn_rand(nn, -1, 1);
             costs.count = 0;
         }
 
@@ -91,22 +79,34 @@ int main()
 
         // RENDERING THE VERIFICATION SLOT
         r =layout_stack_slot(&ls);
-        float fontSize = r.h*(50.0f/WINDOW_HEIGHT);
+        float fontSize = r.h*(25.0f/WINDOW_HEIGHT);
+        int n = 1;
         char buffer[256];
+        float spacing = r.h*0.1;
+        float cntrx = r.w/2-(n+1)*spacing/2;
+        float cntry = r.h/2-(n+1)*spacing/2;
 
         for (size_t i = 0; i < 2; i++) {
+            snprintf(buffer, sizeof(buffer), "%zu\t", i);
+            DrawText(buffer, r.x+(i*spacing)+cntrx, r.y-spacing+cntry, fontSize, WHITE);
+            
+            snprintf(buffer, sizeof(buffer), "%zu\t", i);
+            DrawText(buffer, r.x-spacing+cntrx, r.y+(i*spacing)+cntry, fontSize, WHITE);
             for (size_t j = 0; j < 2; j++) {
                 MAT_AT(NN_INPUT(nn), 0, 0) = i;
                 MAT_AT(NN_INPUT(nn), 0, 1) = j;
                 nn_forward(nn);
-                float y =  MAT_AT(NN_OUTPUT(nn), 0, 0);
-                snprintf(buffer, sizeof(buffer),
-                         "%zu ^ %zu = %f\n", i, j, y);
+                int y =  (MAT_AT(NN_OUTPUT(nn), 0, 0) >= 0.5f) ? 1 : 0;
+
+                Color tr = GREEN;
+                int exp  = i^j;
+                if (y != exp) tr = RED;
+                snprintf(buffer, sizeof(buffer), "%d\t", y);
                 
-                DrawText(buffer, r.x+r.w/4, r.y+r.h/4+(i*2+j)*r.h*0.07, fontSize, WHITE);
+                DrawText(buffer, r.x+(i*spacing)+cntrx, r.y+(j*spacing)+cntry, fontSize, tr);
             }
         }
-        status_line_render(r.h, rw, epoch, max_epochs, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
+        gym_status_line_render(r.h, rw, epoch, max_epochs, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
     layout_stack_pop(&ls);
     EndDrawing();
 
