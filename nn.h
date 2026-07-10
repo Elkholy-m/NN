@@ -4,7 +4,6 @@
 #define MAT_AT(mat, i, j) (mat).es[(i) * (mat).stride + (j)]
 #define MAT_PRINT(mat) mat_print(mat, #mat, 0)
 
-/* #define TRADITIONAL_APPROACH */
 #ifndef NN_ACT
 #define NN_ACT ACT_SIG
 #endif //NN_ACT
@@ -15,6 +14,7 @@
 
 #include <math.h>
 #include <stddef.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -128,16 +128,53 @@ void nn_batch(Batch* batch, NN nn, NN g, Mat t, float rate, size_t batch_size);
         (da)->items[(da)->count++] = item;                                             \
     } while(0)
 
+
+
 typedef struct {
     float* items;
     size_t capacity;
     size_t count;
 } Costs;
 
-void gym_nn_render(NN nn, int x, int y, int w, int h);
-void gym_cost_render(Costs costs, int x, int y, int w, int h);
-#endif // !NN_ENABLE_GYM_
+typedef struct {
+    size_t x;
+    size_t y;
+    size_t w;
+    size_t h;
+} LayoutRect;
 
+typedef enum {
+    LO_HORZ,
+    LO_VERT,
+} LayoutOrient;
+
+typedef struct {
+    LayoutRect rect;
+    LayoutOrient orient;
+    size_t i;
+    size_t count;
+    size_t gap;
+} Layout;
+
+typedef struct {
+    Layout* items;
+    size_t count;
+    size_t capacity;
+} LayoutStack;
+
+#define layout_stack_slot(ls) layout_stack_slot_imp(ls, __FILE__, __LINE__)
+
+LayoutRect rect_constructor(size_t x, size_t y, size_t w, size_t h);
+Layout layout_constructor(LayoutRect rect, LayoutOrient orient, size_t count, size_t gap);
+void layout_stack_push(LayoutStack* ls, LayoutRect rect, LayoutOrient orient, size_t count, size_t gap);
+void layout_stack_pop(LayoutStack* ls);
+LayoutRect layout_slot(Layout *l, const char* file, const int line);
+LayoutRect layout_stack_slot_imp(LayoutStack* ls, const char* file, const int line);
+void widget(LayoutRect rect, Color c);
+
+void gym_nn_render(NN nn, LayoutRect r);
+void gym_cost_render(Costs costs, LayoutRect r);
+#endif // !NN_ENABLE_GYM
 
 #endif // !NN_H_
 
@@ -464,11 +501,11 @@ void nn_backprop(NN nn, NN g, Mat ti, Mat to) {
         }
 
         for (size_t j = 0; j < to.cols; j++) {
-#ifdef TRADITIONAL_APPROACH
+#ifdef NN_TRADITIONAL_APPROACH
             MAT_AT(NN_OUTPUT(g), 0, j) = 2*MAT_AT(NN_OUTPUT(nn), 0, j) - MAT_AT(to, i, j);
 #else
             MAT_AT(NN_OUTPUT(g), 0, j) = MAT_AT(NN_OUTPUT(nn), 0, j) - MAT_AT(to, i, j);
-#endif //TRADITIONAL_APPROACH
+#endif //NN_TRADITIONAL_APPROACH
         }
 
         // THIS  IS THE BACK PROPAGATION OPERATION
@@ -495,11 +532,11 @@ void nn_backprop(NN nn, NN g, Mat ti, Mat to) {
                     break;
                 };
 
-#ifdef TRADITIONAL_APPROACH
+#ifdef NN_TRADITIONAL_APPROACH
                 float s = 1;
 #else
                 float s = 2;
-#endif //TRADITIONAL_APPROACH
+#endif //NN_TRADITIONAL_APPROACH
 
                 MAT_AT(g.bs[l-1], 0, j) += s*da*q;
                 for (size_t k = 0; k < nn.as[l-1].cols; k++) {
@@ -592,14 +629,110 @@ void nn_batch(Batch* batch, NN nn, NN g, Mat t, float rate, size_t batch_size)
 }
 
 #ifdef NN_ENABLE_GYM
-void gym_nn_render(NN nn, int x, int y, int w, int h)
+
+LayoutRect rect_constructor(size_t x, size_t y, size_t w, size_t h)
 {
-    unsigned int neuron_raduis = h*((float)25/WINDOW_HEIGHT);
+    return (LayoutRect) {.x = x, .y = y, .w = w, .h = h};
+}
+
+Layout layout_constructor(LayoutRect rect, LayoutOrient orient, size_t count, size_t gap)
+{
+    return (Layout) {.rect = rect, .orient = orient, .count = count, .gap = gap};
+}
+
+void layout_stack_push(LayoutStack* ls, LayoutRect rect, LayoutOrient orient, size_t count, size_t gap)
+{
+    Layout l = layout_constructor(rect, orient, count, gap);
+    DA_APPEND(ls, l);
+}
+
+void layout_stack_pop(LayoutStack* ls)
+{
+    assert(ls->count > 0);
+    ls->count--;
+}
+
+LayoutRect layout_slot(Layout *l, const char* file, const int line)
+{
+    if (l->i >= l->count) {
+        fprintf(stderr, "%s:%d:\terror: widget overfloaw\n", file, line);
+        exit(EXIT_FAILURE);
+    }
+
+    LayoutRect r = {0};
+    switch(l->orient) {
+    case LO_HORZ:
+        r.w = l->rect.w/l->count;
+        r.h = l->rect.h;
+        r.x = l->rect.x+l->i*r.w;
+        r.y = l->rect.y;
+
+        if (l->i == 0) { // first
+            r.w -= l->gap/2;
+        } else if (l->i == l->count-1) { // last
+            r.x += l->gap/2;
+            r.w -= l->gap/2;
+        } else { //middle
+            r.x += l->gap/2;
+            r.w -= l->gap;
+        }
+        break;
+    case LO_VERT:
+        r.w = l->rect.w;
+        r.h = l->rect.h/l->count;
+        r.x = l->rect.x;
+        r.y = l->rect.y+l->i*r.h;
+
+        if (l->i == 0) { // first
+            r.h -= l->gap/2;
+        } else if (l->i == l->count-1) { // last
+            r.y += l->gap/2;
+            r.h -= l->gap/2;
+        } else { //middle
+            r.y += l->gap/2;
+            r.h -= l->gap;
+        }
+        break;
+    default:
+        assert(0 && "unreachable");
+    }
+    l->i++;
+
+    return r;
+}
+
+LayoutRect layout_stack_slot_imp(LayoutStack* ls, const char* file, const int line)
+{
+    assert(ls->count > 0);
+    return layout_slot(&ls->items[ls->count-1], file, line);
+}
+
+
+
+void widget(LayoutRect rect, Color c)
+{
+    Rectangle rec = {
+        .x = rect.x,
+        .y = rect.y,
+        .width = rect.w,
+        .height = rect.h,
+    };
+
+    if(CheckCollisionPointRec(GetMousePosition(), rec)) {
+        c = ColorBrightness(c, 0.65);
+    }
+
+    DrawRectangleRec(rec,  c);
+}
+
+void gym_nn_render(NN nn, LayoutRect r)
+{
+    unsigned int neuron_raduis = r.h*((float)25/WINDOW_HEIGHT);
     Color low__color       = MAROON;
     Color high_color       = DARKGREEN;
 
-    size_t nn_x = w - 2*BORDER_HPAD;
-    size_t nn_y = h - 2*BORDER_VPAD;
+    size_t nn_x = r.w - 2*BORDER_HPAD;
+    size_t nn_y = r.h - 2*BORDER_VPAD;
 
     size_t no_of_layers = nn.count + 1;
     int hpad = nn_x/no_of_layers;
@@ -607,16 +740,16 @@ void gym_nn_render(NN nn, int x, int y, int w, int h)
     for (size_t i = 0; i < no_of_layers; i++) {
         int vpad_1 = nn_y/nn.as[i].cols;
         for (size_t j = 0; j < nn.as[i].cols; j++) {
-            int cx1 = x + BORDER_HPAD + i*hpad + hpad/2;
-            int cy1 = y +BORDER_VPAD + j*vpad_1 + vpad_1/2;
+            int cx1 = r.x + BORDER_HPAD + i*hpad + hpad/2;
+            int cy1 = r.y +BORDER_VPAD + j*vpad_1 + vpad_1/2;
             if (i < (no_of_layers - 1)) {
                 int vpad_2 = nn_y/nn.as[i+1].cols;
                 for (size_t k = 0; k < nn.as[i+1].cols; k++) {
-                    int cx2 = x + BORDER_HPAD + (i+1)*hpad + hpad/2;
-                    int cy2 = y +BORDER_VPAD + k*vpad_2 + vpad_2/2;
+                    int cx2 = r.x + BORDER_HPAD + (i+1)*hpad + hpad/2;
+                    int cy2 = r.y +BORDER_VPAD + k*vpad_2 + vpad_2/2;
                     
                     float alpha = sigmoidf(MAT_AT(nn.ws[i], j, k));;
-                    float thick = h*(3.0f/WINDOW_HEIGHT);
+                    float thick = r.h*(3.0f/WINDOW_HEIGHT);
                     Color connection_color = ColorAlphaBlend(low__color, high_color, RAYWHITE);
                     high_color.a = floorf(255.f*alpha);
                     DrawLineEx((Vector2){cx1, cy1}, (Vector2){cx2, cy2}, thick, connection_color);
@@ -633,17 +766,17 @@ void gym_nn_render(NN nn, int x, int y, int w, int h)
     }
 }
 
-void gym_cost_render(Costs costs, int x, int y, int w, int h)
+void gym_cost_render(Costs costs, LayoutRect r)
 {
     char buffer[256];
-    float font_size = h*(50.0f/WINDOW_HEIGHT);
+    float font_size = r.h*(50.0f/WINDOW_HEIGHT);
 
     snprintf(buffer, sizeof(buffer), "COST-FUNCTION");
     int tw =  MeasureText(buffer, font_size);
-    DrawText(buffer, x+(w/2-tw/2), y+h, font_size, RAYWHITE);
+    DrawText(buffer, r.x+(r.w/2-tw/2), r.y+r.h, font_size, RAYWHITE);
 
-    w -= BORDER_HPAD;
-    h -= BORDER_VPAD;
+    r.w -= BORDER_HPAD;
+    r.h -= BORDER_VPAD;
 
     float min = FLT_MAX, max = FLT_MIN;
 
@@ -657,35 +790,35 @@ void gym_cost_render(Costs costs, int x, int y, int w, int h)
     if (n < 1000) n = 1000;
 
     // DRAW THE AXIS LINES
-    int thick = h*(5.0f/WINDOW_HEIGHT);
-    int lx = x+BORDER_HPAD/2-thick;
-    int ly = y+BORDER_HPAD/2-thick;
-    float tri_val = (h*10.f/WINDOW_HEIGHT);
+    int thick = r.h*(5.0f/WINDOW_HEIGHT);
+    int lx = r.x+BORDER_HPAD/2-thick;
+    int ly = r.y+BORDER_HPAD/2-thick;
+    float tri_val = (r.h*10.f/WINDOW_HEIGHT);
 
     // X-AXIS 
-    DrawLineEx((Vector2) {lx, ly+h}, (Vector2) {lx+w, ly+h}, thick, RAYWHITE);
-    DrawTriangle((Vector2) {lx+w, ly+h-tri_val}, (Vector2) {lx+w, ly+h+tri_val}, (Vector2) {lx+w+tri_val, ly+h}, RAYWHITE);
+    DrawLineEx((Vector2) {lx, ly+r.h}, (Vector2) {lx+r.w, ly+r.h}, thick, RAYWHITE);
+    DrawTriangle((Vector2) {lx+r.w, ly+r.h-tri_val}, (Vector2) {lx+r.w, ly+r.h+tri_val}, (Vector2) {lx+r.w+tri_val, ly+r.h}, RAYWHITE);
 
     // Y-AXIS
-    DrawLineEx((Vector2) {lx, ly}, (Vector2) {lx, ly+h}, thick, RAYWHITE);
+    DrawLineEx((Vector2) {lx, ly}, (Vector2) {lx, ly+r.h}, thick, RAYWHITE);
     DrawTriangle((Vector2) {lx-tri_val, ly}, (Vector2) {lx+tri_val, ly}, (Vector2) {lx, ly-tri_val}, RAYWHITE);
 
     snprintf(buffer, sizeof(buffer), "0");
-    DrawText(buffer, lx+5, ly+h+5, font_size, RAYWHITE);
+    DrawText(buffer, lx+5, ly+r.h+5, font_size, RAYWHITE);
 
 
     for (size_t i = 0; (i+1) < costs.count; i++) {
-        int x1 = x + BORDER_HPAD/2 + (float)w/n*i;
-        int y1 = y + BORDER_VPAD/2 + (1 - (costs.items[i]-min) / (max-min))*h;
+        int x1 = r.x + BORDER_HPAD/2 + (float)r.w/n*i;
+        int y1 = r.y + BORDER_VPAD/2 + (1 - (costs.items[i]-min) / (max-min))*r.h;
 
-        int x2 = x + BORDER_HPAD/2 + (float)w/n*(i+1);
-        int y2 = y + BORDER_VPAD/2 + (1 - (costs.items[i+1]-min) / (max-min))*h;
+        int x2 = r.x + BORDER_HPAD/2 + (float)r.w/n*(i+1);
+        int y2 = r.y + BORDER_VPAD/2 + (1 - (costs.items[i+1]-min) / (max-min))*r.h;
 
-        float thick = h*(5.0f/WINDOW_HEIGHT);
+        float thick = r.h*(5.0f/WINDOW_HEIGHT);
         DrawLineEx((Vector2) {x1, y1}, (Vector2) {x2, y2}, thick, MAROON);
     }
 }
 
-#endif // !NN_ENABLE_GYM_
+#endif // !NN_ENABLE_GYM
 
 #endif // NN_IMPLEMENTATION
