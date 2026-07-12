@@ -23,7 +23,7 @@
 #define out_height 256
 uint32_t out_pixels[out_width*out_height];
 
-size_t arch[] = {3, 14, 14, 14, 1};
+size_t arch[] = {3, 14, 14, 11, 1};
 
 void original_img_construct(Image* img_prev, uint8_t* pixels)
 {
@@ -318,7 +318,7 @@ int main(int argc, char** argv)
         }
 
         // TAKE SNAP SHOT OF THE BOTTOM TEXTURE
-        if (IsKeyPressed(KEY_S)) {
+        if (IsKeyPressed(KEY_U)) {
             time_t sec = time(0);
             struct tm* now = localtime(&sec);
             char buffer[256];
@@ -328,12 +328,10 @@ int main(int argc, char** argv)
             render_image_snapshot(nn, scroll1, buffer);
         }
 
-        // RENDRING TRANSITION VIDEO USING FFMPEG
-        if (IsKeyPressed(KEY_V)) render_ffmpeg_video(nn, 5, "transition.mp4");
-
-
-        // PAUSE THE LEARNING
         if (IsKeyPressed(KEY_SPACE)) paused = !paused;
+        if (IsKeyPressed(KEY_P)) NN_PRINT(nn);
+        if (IsKeyPressed(KEY_S)) TakeScreenshot("demos_screenshots/img2nn.png");
+        if (IsKeyPressed(KEY_V)) render_ffmpeg_video(nn, 5, "transition.mp4");
 
         // LEARNING PROCESS
         for (size_t j = 0; j < batch_per_frame && epoch < max_epoch && !paused; j++) {
@@ -357,9 +355,11 @@ int main(int argc, char** argv)
         size_t gap = rh*0.03;
 
         layout_stack_push(&ls, rect_constructor(0, frame, rw, rh-2*frame), LO_HORZ, 3, gap);
-
-        gym_cost_render(costs, layout_stack_slot(&ls));
         gym_nn_render(nn, layout_stack_slot(&ls));
+            layout_stack_push(&ls, layout_stack_slot(&ls), LO_VERT, 2, gap);
+            gym_heatmap_render(nn, layout_stack_slot(&ls));
+            gym_cost_render(costs, layout_stack_slot(&ls));
+            layout_stack_pop(&ls);
 
         r = layout_stack_slot(&ls);
         float scale = r.h*8.f/WINDOW_HEIGHT;

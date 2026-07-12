@@ -99,6 +99,13 @@ void nn_batch(Batch* batch, NN nn, NN g, Mat t, float rate, size_t batch_size);
 
 #ifdef NN_ENABLE_GYM
 
+#ifndef low__color
+#define low__color MAROON
+#endif
+#ifndef high_color
+#define high_color DARKGREEN
+#endif
+
 #ifndef WINDOW_FACTOR
 #define WINDOW_FACTOR 80
 #endif
@@ -173,6 +180,7 @@ LayoutRect layout_stack_slot_imp(LayoutStack* ls, const char* file, const int li
 void widget(LayoutRect rect, Color c);
 
 void gym_nn_render(NN nn, LayoutRect r);
+void gym_heatmap_render(NN nn, LayoutRect r);
 void gym_cost_render(Costs costs, LayoutRect r);
 void gym_status_line_render(int h, int rw, size_t epoch, size_t max_epoch, float rate, float cost);
 void gym_slider_render(Vector2 rect_corner, Vector2 rect_size, Vector2 slider_center, float slider_raduis, bool* slider_clicked, float* scroll);
@@ -730,8 +738,6 @@ void widget(LayoutRect rect, Color c)
 void gym_nn_render(NN nn, LayoutRect r)
 {
     unsigned int neuron_raduis = r.h*((float)25/WINDOW_HEIGHT);
-    Color low__color       = MAROON;
-    Color high_color       = DARKGREEN;
 
     size_t nn_x = r.w - 2*BORDER_HPAD;
     size_t nn_y = r.h - 2*BORDER_VPAD;
@@ -750,22 +756,49 @@ void gym_nn_render(NN nn, LayoutRect r)
                     int cx2 = r.x + BORDER_HPAD + (i+1)*hpad + hpad/2;
                     int cy2 = r.y +BORDER_VPAD + k*vpad_2 + vpad_2/2;
                     
-                    float alpha = sigmoidf(MAT_AT(nn.ws[i], j, k));;
-                    float thick = r.h*(3.0f/WINDOW_HEIGHT);
-                    Color connection_color = ColorAlphaBlend(low__color, high_color, RAYWHITE);
-                    high_color.a = floorf(255.f*alpha);
+                    float thick = r.h*(5.0f/WINDOW_HEIGHT);
+                    Color connection_color = ColorLerp(low__color, high_color, sigmoidf(MAT_AT(nn.ws[i], j, k)));
                     DrawLineEx((Vector2){cx1, cy1}, (Vector2){cx2, cy2}, thick, connection_color);
                 }
             }
             if (i == 0) {
                 DrawCircle(cx1, cy1, neuron_raduis, GRAY);
             } else {
-                high_color.a = floorf(255.f*sigmoidf(MAT_AT(nn.bs[i-1], 0, j)));
-                Color neuron_color = ColorAlphaBlend(low__color, high_color, RAYWHITE);
+                Color neuron_color = ColorLerp(low__color, high_color, sigmoidf(MAT_AT(nn.bs[i-1], 0, j)));
                 DrawCircle(cx1, cy1, neuron_raduis, neuron_color);
             }
         }
     }
+}
+
+void gym_heatmap_render(NN nn, LayoutRect r)
+{
+   size_t max_cols = 0;
+   size_t total_rows = 0;
+   size_t no_of_spacing = nn.count - 1;
+   size_t gap = r.h*0.03;
+
+   for (size_t i = 0; i < nn.count; ++i) {
+       if (max_cols < nn.ws[i].cols) max_cols += nn.ws[i].cols;
+       total_rows += nn.ws[i].rows;
+   }
+
+   int cell_width   = r.w/max_cols;
+   int cell_height  = (r.h-(no_of_spacing*gap))/total_rows;
+
+   size_t accumelator = 0;
+
+   for (size_t i = 0; i < nn.count; i++) {
+       for (size_t j = 0; j < nn.ws[i].rows; j++) {
+           size_t no_of_cols = nn.ws[i].cols;
+           size_t cntrx = r.w/2-no_of_cols*cell_width/2;
+           for (size_t k = 0; k < nn.ws[i].cols; k++) {
+               Color connection_color = ColorLerp(low__color, high_color, sigmoidf(MAT_AT(nn.ws[i], j, k)));
+               DrawRectangle(r.x+k*cell_width+cntrx, r.y+accumelator*cell_height+i*gap, cell_width, cell_height, connection_color);
+           }
+           accumelator += 1;
+       }
+   }
 }
 
 void gym_cost_render(Costs costs, LayoutRect r)
@@ -792,7 +825,7 @@ void gym_cost_render(Costs costs, LayoutRect r)
     if (n < 1000) n = 1000;
 
     // DRAW THE AXIS LINES
-    int thick = r.h*(5.0f/WINDOW_HEIGHT);
+    int thick = r.h*(7.0f/WINDOW_HEIGHT);
     int lx = r.x+BORDER_HPAD/2-thick;
     int ly = r.y+BORDER_HPAD/2-thick;
     float tri_val = (r.h*10.f/WINDOW_HEIGHT);
@@ -816,7 +849,7 @@ void gym_cost_render(Costs costs, LayoutRect r)
         int x2 = r.x + BORDER_HPAD/2 + (float)r.w/n*(i+1);
         int y2 = r.y + BORDER_VPAD/2 + (1 - (costs.items[i+1]-min) / (max-min))*r.h;
 
-        float thick = r.h*(5.0f/WINDOW_HEIGHT);
+        float thick = r.h*(7.0f/WINDOW_HEIGHT);
         DrawLineEx((Vector2) {x1, y1}, (Vector2) {x2, y2}, thick, MAROON);
     }
 }

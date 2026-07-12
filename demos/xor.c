@@ -56,6 +56,8 @@ int main()
         }
 
         if (IsKeyPressed(KEY_SPACE)) paused = !paused;
+        if (IsKeyPressed(KEY_P)) NN_PRINT(nn);
+        if (IsKeyPressed(KEY_S)) TakeScreenshot("demos_screenshots/xor.png");
 
         for (size_t i = 0; i < 10 && epoch < max_epochs && !paused; ++i) {
             nn_finite_diff(nn, g, ti, to, eps);
@@ -71,11 +73,15 @@ int main()
         int rw = GetRenderWidth();
         int rh = GetRenderHeight();
         size_t frame = rh*0.25;
-        size_t gap = rh*0.03;
+        size_t gap = rh*0.02;
 
         layout_stack_push(&ls, rect_constructor(0, frame, rw, rh-2*frame), LO_HORZ, 3, gap);
-        gym_cost_render(costs, layout_stack_slot(&ls));
         gym_nn_render(nn, layout_stack_slot(&ls));
+
+            layout_stack_push(&ls, layout_stack_slot(&ls), LO_VERT, 2, gap);
+            gym_heatmap_render(nn, layout_stack_slot(&ls));
+            gym_cost_render(costs, layout_stack_slot(&ls));
+            layout_stack_pop(&ls);
 
         // RENDERING THE VERIFICATION SLOT
         r =layout_stack_slot(&ls);
