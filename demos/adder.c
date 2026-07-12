@@ -76,10 +76,13 @@ int main() {
         size_t gap = rh*0.03;
 
         layout_stack_push(&ls, rect_constructor(0, frame, rw, rh-2*frame), LO_HORZ, 3, gap);
-            gym_nn_render(nn, layout_stack_slot(&ls));
+        layout_stack_push(&ls, layout_stack_slot(&ls), LO_VERT, 2, gap);
+        gym_nn_render(nn, layout_stack_slot(&ls));
+        gym_cost_render(costs, layout_stack_slot(&ls));
+        layout_stack_pop(&ls);
             layout_stack_push(&ls, layout_stack_slot(&ls), LO_VERT, 2, gap);
-            gym_heatmap_render(nn, layout_stack_slot(&ls));
-            gym_cost_render(costs, layout_stack_slot(&ls));
+            gym_heatmap_render(nn, layout_stack_slot(&ls), WEIGHT);
+            gym_heatmap_render(nn, layout_stack_slot(&ls), ACT);
             layout_stack_pop(&ls);
 
         // RENDERING THE VERIFICATION SLOT
@@ -125,6 +128,7 @@ int main() {
             }
 
             gym_status_line_render(r.h, rw, epoch, max_epochs, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
+
         layout_stack_pop(&ls);
         EndDrawing();
 

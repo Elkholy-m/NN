@@ -76,43 +76,49 @@ int main()
         size_t gap = rh*0.02;
 
         layout_stack_push(&ls, rect_constructor(0, frame, rw, rh-2*frame), LO_HORZ, 3, gap);
-        gym_nn_render(nn, layout_stack_slot(&ls));
 
             layout_stack_push(&ls, layout_stack_slot(&ls), LO_VERT, 2, gap);
-            gym_heatmap_render(nn, layout_stack_slot(&ls));
+            gym_nn_render(nn, layout_stack_slot(&ls));
             gym_cost_render(costs, layout_stack_slot(&ls));
             layout_stack_pop(&ls);
 
-        // RENDERING THE VERIFICATION SLOT
-        r =layout_stack_slot(&ls);
-        float fontSize = r.h*(25.0f/WINDOW_HEIGHT);
-        int n = 1;
-        char buffer[256];
-        float spacing = r.h*0.1;
-        float cntrx = r.w/2-(n+1)*spacing/2;
-        float cntry = r.h/2-(n+1)*spacing/2;
+            layout_stack_push(&ls, layout_stack_slot(&ls), LO_VERT, 2, gap);
+            gym_heatmap_render(nn, layout_stack_slot(&ls), WEIGHT);
+            gym_heatmap_render(nn, layout_stack_slot(&ls), ACT);
+            layout_stack_pop(&ls);
 
-        for (size_t i = 0; i < 2; i++) {
-            snprintf(buffer, sizeof(buffer), "%zu\t", i);
-            DrawText(buffer, r.x+(i*spacing)+cntrx, r.y-spacing+cntry, fontSize, WHITE);
-            
-            snprintf(buffer, sizeof(buffer), "%zu\t", i);
-            DrawText(buffer, r.x-spacing+cntrx, r.y+(i*spacing)+cntry, fontSize, WHITE);
-            for (size_t j = 0; j < 2; j++) {
-                MAT_AT(NN_INPUT(nn), 0, 0) = i;
-                MAT_AT(NN_INPUT(nn), 0, 1) = j;
-                nn_forward(nn);
-                int y =  (MAT_AT(NN_OUTPUT(nn), 0, 0) >= 0.5f) ? 1 : 0;
 
-                Color tr = GREEN;
-                int exp  = i^j;
-                if (y != exp) tr = RED;
-                snprintf(buffer, sizeof(buffer), "%d\t", y);
-                
-                DrawText(buffer, r.x+(i*spacing)+cntrx, r.y+(j*spacing)+cntry, fontSize, tr);
+            // RENDERING THE VERIFICATION SLOT
+            r =layout_stack_slot(&ls);
+            float fontSize = r.h*(50.0f/WINDOW_HEIGHT);
+            int n = 1;
+            char buffer[256];
+            float spacing = r.h*0.1;
+            float cntrx = r.w/2-(n+1)*spacing/2;
+            float cntry = r.h/2-(n+1)*spacing/2;
+
+            for (size_t i = 0; i < 2; i++) {
+                snprintf(buffer, sizeof(buffer), "%zu\t", i);
+                DrawText(buffer, r.x+(i*spacing)+cntrx, r.y-spacing+cntry, fontSize, WHITE);
+
+                snprintf(buffer, sizeof(buffer), "%zu\t", i);
+                DrawText(buffer, r.x-spacing+cntrx, r.y+(i*spacing)+cntry, fontSize, WHITE);
+                for (size_t j = 0; j < 2; j++) {
+                    MAT_AT(NN_INPUT(nn), 0, 0) = i;
+                    MAT_AT(NN_INPUT(nn), 0, 1) = j;
+                    nn_forward(nn);
+                    int y =  (MAT_AT(NN_OUTPUT(nn), 0, 0) >= 0.5f) ? 1 : 0;
+
+                    Color tr = GREEN;
+                    int exp  = i^j;
+                    if (y != exp) tr = RED;
+                    snprintf(buffer, sizeof(buffer), "%d\t", y);
+
+                    DrawText(buffer, r.x+(i*spacing)+cntrx, r.y+(j*spacing)+cntry, fontSize, tr);
+                }
             }
-        }
-        gym_status_line_render(r.h, rw, epoch, max_epochs, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
+            gym_status_line_render(r.h, rw, epoch, max_epochs, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
+
     layout_stack_pop(&ls);
     EndDrawing();
 

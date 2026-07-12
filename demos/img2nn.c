@@ -355,10 +355,14 @@ int main(int argc, char** argv)
         size_t gap = rh*0.03;
 
         layout_stack_push(&ls, rect_constructor(0, frame, rw, rh-2*frame), LO_HORZ, 3, gap);
-        gym_nn_render(nn, layout_stack_slot(&ls));
             layout_stack_push(&ls, layout_stack_slot(&ls), LO_VERT, 2, gap);
-            gym_heatmap_render(nn, layout_stack_slot(&ls));
+            gym_nn_render(nn, layout_stack_slot(&ls));
             gym_cost_render(costs, layout_stack_slot(&ls));
+            layout_stack_pop(&ls);
+
+            layout_stack_push(&ls, layout_stack_slot(&ls), LO_VERT, 2, gap);
+            gym_heatmap_render(nn, layout_stack_slot(&ls), WEIGHT);
+            gym_heatmap_render(nn, layout_stack_slot(&ls), ACT);
             layout_stack_pop(&ls);
 
         r = layout_stack_slot(&ls);

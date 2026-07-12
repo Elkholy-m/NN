@@ -169,6 +169,11 @@ typedef struct {
     size_t capacity;
 } LayoutStack;
 
+typedef enum {
+    WEIGHT,
+    ACT,
+} HeatmapKind;
+
 #define layout_stack_slot(ls) layout_stack_slot_imp(ls, __FILE__, __LINE__)
 
 LayoutRect rect_constructor(size_t x, size_t y, size_t w, size_t h);
@@ -180,7 +185,7 @@ LayoutRect layout_stack_slot_imp(LayoutStack* ls, const char* file, const int li
 void widget(LayoutRect rect, Color c);
 
 void gym_nn_render(NN nn, LayoutRect r);
-void gym_heatmap_render(NN nn, LayoutRect r);
+void gym_heatmap_render(NN nn, LayoutRect r, HeatmapKind kind);
 void gym_cost_render(Costs costs, LayoutRect r);
 void gym_status_line_render(int h, int rw, size_t epoch, size_t max_epoch, float rate, float cost);
 void gym_slider_render(Vector2 rect_corner, Vector2 rect_size, Vector2 slider_center, float slider_raduis, bool* slider_clicked, float* scroll);
@@ -771,34 +776,81 @@ void gym_nn_render(NN nn, LayoutRect r)
     }
 }
 
-void gym_heatmap_render(NN nn, LayoutRect r)
+void gym_heatmap_render(NN nn, LayoutRect r, HeatmapKind kind)
 {
-   size_t max_cols = 0;
-   size_t total_rows = 0;
-   size_t no_of_spacing = nn.count - 1;
-   size_t gap = r.h*0.03;
+    size_t max_cols = 0;
+    size_t total_rows = 0;
+    size_t gap = r.h*0.03;
+    size_t no_of_spacing;
+    switch (kind) {
+    case WEIGHT:
+        no_of_spacing = nn.count - 1;
+        for (size_t i = 0; i < nn.count; ++i) {
+            if (max_cols < nn.ws[i].cols) max_cols += nn.ws[i].cols;
+            total_rows += nn.ws[i].rows;
+        }
+        break;
+    case ACT:
+        no_of_spacing = nn.count;
+        for (size_t i = 0; i < nn.count+1; ++i) {
+            if (max_cols < nn.as[i].cols) max_cols += nn.as[i].cols;
+            total_rows += nn.as[i].rows;
+        }
+        break;
+    default:
+        NN_ASSERT(0 && "Unreachable");
+    }
 
-   for (size_t i = 0; i < nn.count; ++i) {
-       if (max_cols < nn.ws[i].cols) max_cols += nn.ws[i].cols;
-       total_rows += nn.ws[i].rows;
-   }
+    
+    char buffer[256];
+    float font_size = r.h*(50.0f/WINDOW_HEIGHT);
+    int label_height = r.h*0.02;
+    int tw;
 
-   int cell_width   = r.w/max_cols;
-   int cell_height  = (r.h-(no_of_spacing*gap))/total_rows;
+    int cell_width   = r.w/max_cols;
+    int cell_height  = (r.h-(no_of_spacing*gap+label_height))/total_rows;
+    size_t accumelator = 0;
 
-   size_t accumelator = 0;
+    switch (kind) {
+    case WEIGHT:
+        for (size_t i = 0; i < nn.count; i++) {
+            for (size_t j = 0; j < nn.ws[i].rows; j++) {
+                size_t no_of_cols = nn.ws[i].cols;
+                size_t cntrx = r.w/2-no_of_cols*cell_width/2;
+                for (size_t k = 0; k < nn.ws[i].cols; k++) {
+                    Color connection_color = ColorLerp(low__color, high_color, sigmoidf(MAT_AT(nn.ws[i], j, k)));
+                    DrawRectangle(r.x+k*cell_width+cntrx, r.y+accumelator*cell_height+i*gap, cell_width, cell_height, connection_color);
+                }
+                accumelator += 1;
+            }
+        }
 
-   for (size_t i = 0; i < nn.count; i++) {
-       for (size_t j = 0; j < nn.ws[i].rows; j++) {
-           size_t no_of_cols = nn.ws[i].cols;
-           size_t cntrx = r.w/2-no_of_cols*cell_width/2;
-           for (size_t k = 0; k < nn.ws[i].cols; k++) {
-               Color connection_color = ColorLerp(low__color, high_color, sigmoidf(MAT_AT(nn.ws[i], j, k)));
-               DrawRectangle(r.x+k*cell_width+cntrx, r.y+accumelator*cell_height+i*gap, cell_width, cell_height, connection_color);
-           }
-           accumelator += 1;
-       }
-   }
+
+        snprintf(buffer, sizeof(buffer), "WEIGHTS");
+        tw =  MeasureText(buffer, font_size);
+        DrawText(buffer, r.x+(r.w/2-tw/2), r.y+r.h, font_size, RAYWHITE);
+        break;
+    case ACT:
+        for (size_t i = 0; i < nn.count+1; i++) {
+            for (size_t j = 0; j < nn.as[i].rows; j++) {
+                size_t no_of_cols = nn.as[i].cols;
+                size_t cntrx = r.w/2-no_of_cols*cell_width/2;
+                for (size_t k = 0; k < nn.as[i].cols; k++) {
+                    Color connection_color = ColorLerp(low__color, high_color, sigmoidf(MAT_AT(nn.as[i], j, k)));
+                    DrawRectangle(r.x+k*cell_width+cntrx, r.y+accumelator*cell_height+i*gap, cell_width, cell_height, connection_color);
+                }
+                accumelator += 1;
+            }
+        }
+
+        snprintf(buffer, sizeof(buffer), "ACTIVATIONS");
+        tw =  MeasureText(buffer, font_size);
+        DrawText(buffer, r.x+(r.w/2-tw/2), r.y+r.h, font_size, RAYWHITE);
+        break;
+    default:
+        NN_ASSERT(0 && "Unreachable");
+    }
+
 }
 
 void gym_cost_render(Costs costs, LayoutRect r)
