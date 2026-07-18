@@ -43,7 +43,7 @@ float reluf(float x);
 typedef struct {
     size_t capacity;
     size_t size;
-    char*  data;
+    uintptr_t*  words;
 } Region;
 
 Region region_alloc_alloc(size_t capacity_bytes);
@@ -220,24 +220,27 @@ float reluf(float x) {
 
 Region region_alloc_alloc(size_t capacity_bytes)
 {
-    return (Region) {
-        .capacity = capacity_bytes,
-        .size = 0,
-        .data = NN_MALLOC(capacity_bytes),
-    };
+    Region r = {0};
+    size_t word_size = sizeof(*r.words);
+    size_t capacity_words = (capacity_bytes+word_size-1) / word_size;
+    r.capacity = capacity_words;
+    r.words = NN_MALLOC(capacity_words*word_size);
+    return r;
 }
 
 void* region_alloc(Region* r, size_t size_bytes)
 {
+    size_t word_size = sizeof(*(r->words));
+    size_t size_words = (size_bytes+word_size-1) / word_size;
     if (r == NULL) return NN_MALLOC(size_bytes);
 
     // RUN TIME CHECK
-    NN_ASSERT((r->size + size_bytes) <= r->capacity);
+    NN_ASSERT((r->size + size_words) <= r->capacity);
     // COMPILE TIME CHECK SO IF THE USER CHANGE NN_ASSERT() IT STILL HANDLE IT
-    if ((r->size + size_bytes) > r->capacity) return NULL;
+    if ((r->size + size_words) > r->capacity) return NULL;
 
-    void* result = &r->data[r->size];
-    r->size += size_bytes;
+    void* result = &r->words[r->size];
+    r->size += size_words;
     return result;
 }
 
@@ -956,7 +959,7 @@ void gym_status_line_render(int h, int rw, size_t epoch, size_t max_epoch, float
     char buffer[256];
     snprintf(buffer, sizeof(buffer),
     "Epoch: %zu/%zu\t\tRate: %.5f\t\tCost: %f\t\t Memory Usage: %zu",
-    epoch, max_epoch, rate, cost, r->size);
+    epoch, max_epoch, rate, cost, r->size*sizeof(r->words));
     
     float font_size = h*(50.0f/WINDOW_HEIGHT);
     int tw =  MeasureText(buffer, font_size);
