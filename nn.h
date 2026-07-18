@@ -1,8 +1,5 @@
 #ifndef NN_H_
 #define NN_H_
-#define ARRAY_LEN(arr) (sizeof(arr)/sizeof(arr[0]))
-#define MAT_AT(mat, i, j) (mat).es[(i) * (mat).stride + (j)]
-#define MAT_PRINT(mat) mat_print(mat, #mat, 0)
 
 #ifndef NN_ACT
 #define NN_ACT ACT_SIG
@@ -31,11 +28,28 @@
 #define NN_MALLOC malloc
 #endif // !NN_MALLOC
 
+#define NN_INPUT(nn)  (nn).as[0]
+#define NN_OUTPUT(nn) (nn).as[(nn).count]
+#define NN_PRINT(nn) nn_print(nn, #nn)
+#define ARRAY_LEN(arr) (sizeof(arr)/sizeof(arr[0]))
+#define MAT_AT(mat, i, j) (mat).es[(i) * (mat).stride + (j)]
+#define MAT_PRINT(mat) mat_print(mat, #mat, 0)
+#define COORDINATE(i, j) (Coord){.x = (i), .y = (j)}
+
 float rand_float();
 float sigmoidf(float x);
 float reluf(float x);
 
-#define COORDINATE(i, j) (Coord){.x = (i), .y = (j)}
+typedef struct {
+    size_t capacity;
+    size_t size;
+    char*  data;
+} Region;
+
+Region region_alloc_alloc(size_t capacity_bytes);
+void* region_alloc(Region* r, size_t size_bytes);
+#define region_reset(r) (NN_ASSERT(r != NULL), (r)->size = 0)
+
 typedef enum {
     ACT_SIG,
     ACT_RELU,
@@ -55,10 +69,10 @@ typedef struct {
     float* es;
 } Mat;
 
-Mat mat_alloc(size_t rows, size_t cols);
+Mat mat_alloc(Region* r, size_t rows, size_t cols);
 void mat_shuffle(Mat mat);
 void mat_save(Mat mat, FILE* out);
-Mat mat_load(FILE* in);
+Mat mat_load(Region* r, FILE* in);
 void mat_dot(Mat des, Mat a, Mat b);
 void mat_sum(Mat des, Mat a);
 Mat mat_row(Mat mat, size_t row);
@@ -69,11 +83,8 @@ void mat_fill(Mat mat, float x);
 void mat_act(Mat mat);
 void mat_print(Mat mat, const char* name, size_t padding);
 
-#define NN_INPUT(nn)  (nn).as[0]
-#define NN_OUTPUT(nn) (nn).as[(nn).count]
-#define NN_PRINT(nn) nn_print(nn, #nn)
-
 typedef struct {
+    size_t* arch;
     size_t count;
     Mat* ws;
     Mat* bs;
@@ -86,16 +97,16 @@ typedef struct {
     bool end;
 } Batch;
 
-NN nn_alloc(size_t* arch, size_t arch_count);
+NN nn_alloc(Region* r, size_t* arch, size_t arch_count);
 void nn_print(NN nn, const char* name);
 void nn_rand(NN nn, float low, float high);
 void nn_forward(NN nn);
 float nn_cost(NN nn, Mat ti, Mat to);
-void nn_finite_diff(NN nn, NN g, Mat ti, Mat to, float eps);
-void nn_backprop(NN nn, NN g, Mat ti, Mat to);
+NN nn_finite_diff(Region* r, NN nn, Mat ti, Mat to, float eps);
+NN nn_backprop(Region* r, NN nn, Mat ti, Mat to);
 void nn_learn(NN nn, NN g, float rate);
 void nn_zero(NN nn);
-void nn_batch(Batch* batch, NN nn, NN g, Mat t, float rate, size_t batch_size);
+void nn_batch(Region* r, Batch* batch, NN nn, Mat t, float rate, size_t batch_size);
 
 #ifdef NN_ENABLE_GYM
 
@@ -187,7 +198,7 @@ void widget(LayoutRect rect, Color c);
 void gym_nn_render(NN nn, LayoutRect r);
 void gym_heatmap_render(NN nn, LayoutRect r, HeatmapKind kind);
 void gym_cost_render(Costs costs, LayoutRect r);
-void gym_status_line_render(int h, int rw, size_t epoch, size_t max_epoch, float rate, float cost);
+void gym_status_line_render(int h, int rw, size_t epoch, size_t max_epoch, float rate, float cost, Region* r);
 void gym_slider_render(Vector2 rect_corner, Vector2 rect_size, Vector2 slider_center, float slider_raduis, bool* slider_clicked, float* scroll);
 #endif // !NN_ENABLE_GYM
 
@@ -207,12 +218,35 @@ float reluf(float x) {
     return (x > 0) ? x : x*NN_RELU_PARAM;
 }
 
-Mat mat_alloc(size_t rows, size_t cols) {
+Region region_alloc_alloc(size_t capacity_bytes)
+{
+    return (Region) {
+        .capacity = capacity_bytes,
+        .size = 0,
+        .data = NN_MALLOC(capacity_bytes),
+    };
+}
+
+void* region_alloc(Region* r, size_t size_bytes)
+{
+    if (r == NULL) return NN_MALLOC(size_bytes);
+
+    // RUN TIME CHECK
+    NN_ASSERT((r->size + size_bytes) <= r->capacity);
+    // COMPILE TIME CHECK SO IF THE USER CHANGE NN_ASSERT() IT STILL HANDLE IT
+    if ((r->size + size_bytes) > r->capacity) return NULL;
+
+    void* result = &r->data[r->size];
+    r->size += size_bytes;
+    return result;
+}
+
+Mat mat_alloc(Region* r, size_t rows, size_t cols) {
     Mat m;
     m.rows = rows,
     m.cols = cols,
     m.stride = cols,
-    m.es = NN_MALLOC(sizeof(*m.es)*rows*cols);
+    m.es = region_alloc(r, sizeof(*m.es)*rows*cols);
 
     NN_ASSERT(m.es != NULL);
     return m;
@@ -249,7 +283,7 @@ void mat_save(Mat mat, FILE* out)
     }
 }
 
-Mat mat_load(FILE* in)
+Mat mat_load(Region* r, FILE* in)
 {
     uint64_t magic;
     size_t rows, cols;
@@ -262,7 +296,7 @@ Mat mat_load(FILE* in)
     (void)!fread(&rows  , sizeof(rows) , 1, in);
     (void)!fread(&cols  , sizeof(cols) , 1, in);
 
-    Mat mat = mat_alloc(rows, cols);
+    Mat mat = mat_alloc(r, rows, cols);
     size_t n = fread(mat.es, sizeof(*mat.es), rows*cols, in);
     while (n < rows*cols && !ferror(in)) {
         size_t k = fread(mat.es+n, sizeof(*mat.es), rows*cols-n, in);
@@ -387,20 +421,21 @@ void mat_print(Mat mat, const char* name, size_t padding) {
 }
 
 
-NN nn_alloc(size_t* arch, size_t arch_count) {
+NN nn_alloc(Region* r, size_t* arch, size_t arch_count) {
     NN_ASSERT(arch_count > 0);
 
     NN nn;
+    nn.arch = arch;
     nn.count = arch_count - 1;
-    nn.ws = NN_MALLOC(sizeof(*nn.ws) * nn.count);
-    nn.bs = NN_MALLOC(sizeof(*nn.bs) * nn.count);
-    nn.as = NN_MALLOC(sizeof(*nn.bs) * arch_count);
+    nn.ws = region_alloc(r, sizeof(*nn.ws) * nn.count);
+    nn.bs = region_alloc(r, sizeof(*nn.bs) * nn.count);
+    nn.as = region_alloc(r, sizeof(*nn.bs) * arch_count);
     
-    NN_INPUT(nn) = mat_alloc(1, arch[0]);
+    NN_INPUT(nn) = mat_alloc(r, 1, arch[0]);
     for (size_t i = 1; i < arch_count; i++) {
-        nn.as[i]     = mat_alloc(1, arch[i]);
-        nn.ws[i - 1] = mat_alloc(arch[i - 1], arch[i]);
-        nn.bs[i - 1] = mat_alloc(1, arch[i]);
+        nn.as[i]     = mat_alloc(r, 1, arch[i]);
+        nn.ws[i - 1] = mat_alloc(r, arch[i - 1], arch[i]);
+        nn.bs[i - 1] = mat_alloc(r, 1, arch[i]);
     }
 
     return nn;
@@ -457,10 +492,13 @@ float nn_cost(NN nn, Mat ti, Mat to) {
     return c/n;
 }
 
-void nn_finite_diff(NN nn, NN g, Mat ti, Mat to, float eps) {
-    NN_ASSERT(nn.count == g.count);
+NN nn_finite_diff(Region* r, NN nn, Mat ti, Mat to, float eps)
+{
+    // NN_ASSERT(nn.count == g.count);
     NN_ASSERT(ti.rows == to.rows);
     NN_ASSERT(to.cols == NN_OUTPUT(nn).cols);
+
+    NN g = nn_alloc(r, nn.arch, nn.count+1);
 
     float saved;
     float c = nn_cost(nn, ti, to);
@@ -491,10 +529,13 @@ void nn_finite_diff(NN nn, NN g, Mat ti, Mat to, float eps) {
             }
         }
     }
+
+    return g;
 }
 
-void nn_backprop(NN nn, NN g, Mat ti, Mat to) {
-    NN_ASSERT(nn.count == g.count);
+NN nn_backprop(Region* r, NN nn, Mat ti, Mat to)
+{
+    // NN_ASSERT(nn.count == g.count);
     NN_ASSERT(ti.rows == to.rows);
     NN_ASSERT(NN_INPUT(nn).cols == ti.cols);
     NN_ASSERT(NN_OUTPUT(nn).cols == to.cols);
@@ -503,6 +544,8 @@ void nn_backprop(NN nn, NN g, Mat ti, Mat to) {
     // L -> CURRENT LAYER
     // J -> CURRENT ACTIVATION
     // K -> PREVIOUS ACTIVATION
+
+    NN g = nn_alloc(r, nn.arch, nn.count+1);
 
     nn_zero(g);
     size_t n = ti.rows;
@@ -577,6 +620,8 @@ void nn_backprop(NN nn, NN g, Mat ti, Mat to) {
             }
         }
     }
+
+    return g;
 }
 
 void nn_learn(NN nn, NN g, float rate) {
@@ -605,7 +650,7 @@ void nn_zero(NN nn) {
 }
 
 // batch size, t training data, rate, epoch, costs
-void nn_batch(Batch* batch, NN nn, NN g, Mat t, float rate, size_t batch_size)
+void nn_batch(Region* r, Batch* batch, NN nn, Mat t, float rate, size_t batch_size)
 {
     if (batch->end){
         batch->end = false;
@@ -632,7 +677,7 @@ void nn_batch(Batch* batch, NN nn, NN g, Mat t, float rate, size_t batch_size)
     };
 
 
-    nn_backprop(nn, g, batch_ti, batch_to);
+    NN g = nn_backprop(r, nn, batch_ti, batch_to);
     nn_learn(nn, g, rate);
     batch->cost += nn_cost(nn, batch_ti, batch_to);
     batch->start += batch_size;
@@ -906,12 +951,12 @@ void gym_cost_render(Costs costs, LayoutRect r)
     }
 }
 
-void gym_status_line_render(int h, int rw, size_t epoch, size_t max_epoch, float rate, float cost)
+void gym_status_line_render(int h, int rw, size_t epoch, size_t max_epoch, float rate, float cost, Region* r)
 {
     char buffer[256];
     snprintf(buffer, sizeof(buffer),
-    "Epoch: %zu/%zu\t\tRate: %.5f\t\tCost: %f",
-    epoch, max_epoch, rate, cost);
+    "Epoch: %zu/%zu\t\tRate: %.5f\t\tCost: %f\t\t Memory Usage: %zu",
+    epoch, max_epoch, rate, cost, r->size);
     
     float font_size = h*(50.0f/WINDOW_HEIGHT);
     int tw =  MeasureText(buffer, font_size);

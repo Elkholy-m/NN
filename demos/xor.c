@@ -25,12 +25,13 @@ Mat xor = { .rows = 4, .cols = 3, .stride = 3, .es = td, };
 
 int main()
 {
+    Region temp = region_alloc_alloc(64*1024*1024);
+
     Mat ti = mat_sub(xor, COORDINATE(0, 0), COORDINATE(3, 1));
     Mat to = mat_sub(xor, COORDINATE(0, 2), COORDINATE(3, 2));
 
     srand(time(0));
-    NN nn = nn_alloc(arch, ARRAY_LEN(arch));
-    NN g  = nn_alloc(arch, ARRAY_LEN(arch));
+    NN nn = nn_alloc(NULL, arch, ARRAY_LEN(arch));
     nn_rand(nn, -1, 1);
 
     Costs costs = {0};
@@ -60,7 +61,7 @@ int main()
         if (IsKeyPressed(KEY_S)) TakeScreenshot("demos_screenshots/xor.png");
 
         for (size_t i = 0; i < 10 && epoch < max_epochs && !paused; ++i) {
-            nn_finite_diff(nn, g, ti, to, eps);
+            NN g = nn_finite_diff(&temp, nn, ti, to, eps);
             nn_learn(nn, g, rate);
             DA_APPEND(&costs, nn_cost(nn, ti, to));
             epoch++;
@@ -76,17 +77,12 @@ int main()
         size_t gap = rh*0.02;
 
         layout_stack_push(&ls, rect_constructor(0, frame, rw, rh-2*frame), LO_HORZ, 3, gap);
-
-            layout_stack_push(&ls, layout_stack_slot(&ls), LO_VERT, 2, gap);
-            gym_nn_render(nn, layout_stack_slot(&ls));
-            gym_cost_render(costs, layout_stack_slot(&ls));
-            layout_stack_pop(&ls);
+        gym_nn_render(nn, layout_stack_slot(&ls));
 
             layout_stack_push(&ls, layout_stack_slot(&ls), LO_VERT, 2, gap);
             gym_heatmap_render(nn, layout_stack_slot(&ls), WEIGHT);
-            gym_heatmap_render(nn, layout_stack_slot(&ls), ACT);
+            gym_cost_render(costs, layout_stack_slot(&ls));
             layout_stack_pop(&ls);
-
 
             // RENDERING THE VERIFICATION SLOT
             r =layout_stack_slot(&ls);
@@ -117,13 +113,14 @@ int main()
                     DrawText(buffer, r.x+(i*spacing)+cntrx, r.y+(j*spacing)+cntry, fontSize, tr);
                 }
             }
-            gym_status_line_render(r.h, rw, epoch, max_epochs, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
+            gym_status_line_render(r.h, rw, epoch, max_epochs, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0, &temp);
 
     layout_stack_pop(&ls);
     EndDrawing();
 
     // ENSURE NO MEMORY LEAKS INSIDE THE LOOP
     assert(ls.count == 0);
+    region_reset(&temp);
     }
 
     CloseWindow();

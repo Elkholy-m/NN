@@ -241,9 +241,11 @@ int main(int argc, char** argv)
     check(img_pixels2 == NULL, "Couldn't open file: %s\n", img_file_path2);
     check(img_comp2 != 1, "The image: %s is not grey scaled it has %d components\n", img_file_path2, img_comp2);
 
+    Region temp = region_alloc_alloc(64*1024*1024);
+
     size_t rows = img_width1*img_height1 + img_height2*img_width2;
     size_t cols = arch[0] + arch[ARRAY_LEN(arch)-1];
-    Mat t = mat_alloc(rows, cols);
+    Mat t = mat_alloc(NULL, rows, cols);
     for (int y = 0; y < img_height1; y++) {
         for (int x = 0; x < img_width1; x++) {
             int i = y*img_width1+x;
@@ -266,8 +268,7 @@ int main(int argc, char** argv)
         }
     }
 
-    NN nn = nn_alloc(arch, ARRAY_LEN(arch));
-    NN g  = nn_alloc(arch, ARRAY_LEN(arch));
+    NN nn = nn_alloc(NULL, arch, ARRAY_LEN(arch));
     size_t epoch = 0;
     size_t max_epoch = 100000;
     Costs costs = {0};
@@ -335,7 +336,7 @@ int main(int argc, char** argv)
 
         // LEARNING PROCESS
         for (size_t j = 0; j < batch_per_frame && epoch < max_epoch && !paused; j++) {
-            nn_batch(&batch, nn, g, t, rate, batch_size);
+            nn_batch(&temp, &batch, nn, t, rate, batch_size);
            
             if (batch.end) {
                 DA_APPEND(&costs, batch.cost);
@@ -355,14 +356,11 @@ int main(int argc, char** argv)
         size_t gap = rh*0.03;
 
         layout_stack_push(&ls, rect_constructor(0, frame, rw, rh-2*frame), LO_HORZ, 3, gap);
-            layout_stack_push(&ls, layout_stack_slot(&ls), LO_VERT, 2, gap);
             gym_nn_render(nn, layout_stack_slot(&ls));
-            gym_cost_render(costs, layout_stack_slot(&ls));
-            layout_stack_pop(&ls);
 
             layout_stack_push(&ls, layout_stack_slot(&ls), LO_VERT, 2, gap);
             gym_heatmap_render(nn, layout_stack_slot(&ls), WEIGHT);
-            gym_heatmap_render(nn, layout_stack_slot(&ls), ACT);
+            gym_cost_render(costs, layout_stack_slot(&ls));
             layout_stack_pop(&ls);
 
         r = layout_stack_slot(&ls);
@@ -375,11 +373,12 @@ int main(int argc, char** argv)
                             training_prev1, training_prev2, training_prev3,
                             original_prev1, original_prev2);
 
-        gym_status_line_render(r.h, rw, epoch, max_epoch, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
+        gym_status_line_render(r.h, rw, epoch, max_epoch, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0, &temp);
         layout_stack_pop(&ls);
         EndDrawing();
 
         assert(ls.count == 0);
+        region_reset(&temp);
     }
     
     CloseWindow();

@@ -9,13 +9,16 @@
 #define BITS 4
 size_t arch[] = {2*BITS, 4*BITS, BITS+1};
 
-int main() {
+int main()
+{
+    Region temp = region_alloc_alloc(64*1024*1024);
+
     // PREPARE THE TRAINING SET FOR ADDER
     int n = (1<<BITS);
     int rows = n*n;
     int maxwidth = (n == 0) ? 1 : (int)log10(n) + 1;
-    Mat ti = mat_alloc(rows, 2*BITS);
-    Mat to = mat_alloc(rows, BITS+1);
+    Mat ti = mat_alloc(NULL, rows, 2*BITS);
+    Mat to = mat_alloc(NULL, rows, BITS+1);
     for (int i = 0; i < rows; i++) {
         int x = i/n; 
         int y = i%n; 
@@ -30,8 +33,7 @@ int main() {
 
     // MODEL LEARNING
     srand(time(0));
-    NN nn = nn_alloc(arch, ARRAY_LEN(arch));
-    NN g  = nn_alloc(arch, ARRAY_LEN(arch));
+    NN nn = nn_alloc(NULL, arch, ARRAY_LEN(arch));
     nn_rand(nn, -1, 1);
 
     Costs costs = {0};
@@ -60,7 +62,7 @@ int main() {
         if (IsKeyPressed(KEY_S)) TakeScreenshot("demos_screenshots/adder.png");
 
         for (size_t i = 0; i < 10 && epoch < max_epochs && !paused; ++i) {
-            nn_backprop(nn, g, ti, to);
+            NN g = nn_backprop(&temp, nn, ti, to);
             nn_learn(nn, g, rate);
             DA_APPEND(&costs, nn_cost(nn, ti, to));
             epoch++;
@@ -76,13 +78,10 @@ int main() {
         size_t gap = rh*0.03;
 
         layout_stack_push(&ls, rect_constructor(0, frame, rw, rh-2*frame), LO_HORZ, 3, gap);
-        layout_stack_push(&ls, layout_stack_slot(&ls), LO_VERT, 2, gap);
         gym_nn_render(nn, layout_stack_slot(&ls));
-        gym_cost_render(costs, layout_stack_slot(&ls));
-        layout_stack_pop(&ls);
             layout_stack_push(&ls, layout_stack_slot(&ls), LO_VERT, 2, gap);
             gym_heatmap_render(nn, layout_stack_slot(&ls), WEIGHT);
-            gym_heatmap_render(nn, layout_stack_slot(&ls), ACT);
+            gym_cost_render(costs, layout_stack_slot(&ls));
             layout_stack_pop(&ls);
 
         // RENDERING THE VERIFICATION SLOT
@@ -127,13 +126,14 @@ int main() {
                 }
             }
 
-            gym_status_line_render(r.h, rw, epoch, max_epochs, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0);
+            gym_status_line_render(r.h, rw, epoch, max_epochs, rate, costs.count > 0 ? costs.items[costs.count - 1] : 0, &temp);
 
         layout_stack_pop(&ls);
         EndDrawing();
 
         // ENSURE NO MEMORY LEAKS INSIDE THE LOOP
         assert(ls.count == 0);
+        region_reset(&temp);
     }
 
     CloseWindow();
