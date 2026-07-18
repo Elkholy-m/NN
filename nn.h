@@ -29,7 +29,7 @@
 #endif // !NN_MALLOC
 
 #define NN_INPUT(nn)  (nn).as[0]
-#define NN_OUTPUT(nn) (nn).as[(nn).count]
+#define NN_OUTPUT(nn) (nn).as[(nn).arch_count-1]
 #define NN_PRINT(nn) nn_print(nn, #nn)
 #define ARRAY_LEN(arr) (sizeof(arr)/sizeof(arr[0]))
 #define MAT_AT(mat, i, j) (mat).es[(i) * (mat).stride + (j)]
@@ -85,10 +85,10 @@ void mat_print(Mat mat, const char* name, size_t padding);
 
 typedef struct {
     size_t* arch;
-    size_t count;
-    Mat* ws;
-    Mat* bs;
-    Mat* as; // activations => count + 1
+    size_t arch_count;
+    Mat* ws; // weights     => arch_count-1
+    Mat* bs; // biases      => arch_count-1
+    Mat* as; // activations => arch_count
 } NN;
 
 typedef struct { 
@@ -426,10 +426,10 @@ NN nn_alloc(Region* r, size_t* arch, size_t arch_count) {
 
     NN nn;
     nn.arch = arch;
-    nn.count = arch_count - 1;
-    nn.ws = region_alloc(r, sizeof(*nn.ws) * nn.count);
-    nn.bs = region_alloc(r, sizeof(*nn.bs) * nn.count);
-    nn.as = region_alloc(r, sizeof(*nn.bs) * arch_count);
+    nn.arch_count = arch_count;
+    nn.ws = region_alloc(r, sizeof(*nn.ws) * nn.arch_count-1);
+    nn.bs = region_alloc(r, sizeof(*nn.bs) * nn.arch_count-1);
+    nn.as = region_alloc(r, sizeof(*nn.bs) * nn.arch_count);
     
     NN_INPUT(nn) = mat_alloc(r, 1, arch[0]);
     for (size_t i = 1; i < arch_count; i++) {
@@ -444,7 +444,7 @@ NN nn_alloc(Region* r, size_t* arch, size_t arch_count) {
 void nn_print(NN nn, const char* name) {
     char buff[256];
     printf("%s: [\n", name);
-    for (size_t i = 0; i < nn.count; i++) {
+    for (size_t i = 0; i < nn.arch_count-1; i++) {
         snprintf(buff, sizeof(buff), "w%zu::[%zu]x[%zu]", i, nn.ws[i].rows, nn.ws[i].cols);
         mat_print(nn.ws[i], buff, 4);
         snprintf(buff, sizeof(buff), "b%zu::[%zu]x[%zu]", i, nn.bs[i].rows, nn.bs[i].cols);
@@ -454,14 +454,14 @@ void nn_print(NN nn, const char* name) {
 }
 
 void nn_rand(NN nn, float low, float high) {
-    for (size_t i = 0; i < nn.count; i++) {
+    for (size_t i = 0; i < nn.arch_count-1; i++) {
         mat_rand(nn.ws[i], low, high);
         mat_rand(nn.bs[i], low, high);
     }
 }
 
 void nn_forward(NN nn) {
-    for (size_t i = 0; i < nn.count; i++) {
+    for (size_t i = 0; i < nn.arch_count-1; i++) {
         mat_dot(nn.as[i + 1], nn.as[i], nn.ws[i]);
         mat_sum(nn.as[i + 1], nn.bs[i]);
         mat_act(nn.as[i + 1]);
@@ -498,11 +498,11 @@ NN nn_finite_diff(Region* r, NN nn, Mat ti, Mat to, float eps)
     NN_ASSERT(ti.rows == to.rows);
     NN_ASSERT(to.cols == NN_OUTPUT(nn).cols);
 
-    NN g = nn_alloc(r, nn.arch, nn.count+1);
+    NN g = nn_alloc(r, nn.arch, nn.arch_count);
 
     float saved;
     float c = nn_cost(nn, ti, to);
-    for (size_t i = 0; i < nn.count; i++) {
+    for (size_t i = 0; i < nn.arch_count-1; i++) {
         for (size_t j = 0; j < nn.ws[i].rows; j++) {
             for (size_t k = 0; k < nn.ws[i].cols; k++) {
                 NN_ASSERT(nn.ws[i].rows == g.ws[i].rows);
@@ -516,7 +516,7 @@ NN nn_finite_diff(Region* r, NN nn, Mat ti, Mat to, float eps)
         }
     }
 
-    for (size_t i = 0; i < nn.count; i++) {
+    for (size_t i = 0; i < nn.arch_count-1; i++) {
         for (size_t j = 0; j < nn.bs[i].rows; j++) {
             for (size_t k = 0; k < nn.bs[i].cols; k++) {
                 NN_ASSERT(nn.bs[i].rows == g.bs[i].rows);
@@ -545,7 +545,7 @@ NN nn_backprop(Region* r, NN nn, Mat ti, Mat to)
     // J -> CURRENT ACTIVATION
     // K -> PREVIOUS ACTIVATION
 
-    NN g = nn_alloc(r, nn.arch, nn.count+1);
+    NN g = nn_alloc(r, nn.arch, nn.arch_count);
 
     nn_zero(g);
     size_t n = ti.rows;
@@ -554,7 +554,7 @@ NN nn_backprop(Region* r, NN nn, Mat ti, Mat to)
         mat_copy(NN_INPUT(nn), mat_row(ti, i));
         nn_forward(nn);
 
-        for (size_t j = 0; j <= nn.count; j++) {
+        for (size_t j = 0; j <= nn.arch_count-1; j++) {
             mat_fill(g.as[j], 0);
         }
 
@@ -567,7 +567,7 @@ NN nn_backprop(Region* r, NN nn, Mat ti, Mat to)
         }
 
         // THIS  IS THE BACK PROPAGATION OPERATION
-        for (size_t l = nn.count; l > 0; l--) {
+        for (size_t l = nn.arch_count-1; l > 0; l--) {
             for (size_t j = 0; j < nn.as[l].cols; j++) {
                 float a = MAT_AT(nn.as[l], 0, j);
                 float da = MAT_AT(g.as[l], 0, j);
@@ -607,7 +607,7 @@ NN nn_backprop(Region* r, NN nn, Mat ti, Mat to)
         }
     }
 
-    for (size_t i = 0; i < g.count; i++) {
+    for (size_t i = 0; i < g.arch_count-1; i++) {
         for (size_t j = 0; j < g.ws[i].rows; j++) {
             for (size_t k = 0; k < g.ws[i].cols; k++) {
                 MAT_AT(g.ws[i], j, k) /= n;
@@ -625,7 +625,7 @@ NN nn_backprop(Region* r, NN nn, Mat ti, Mat to)
 }
 
 void nn_learn(NN nn, NN g, float rate) {
-    for (size_t i = 0; i < nn.count; i++) {
+    for (size_t i = 0; i < nn.arch_count-1; i++) {
         for (size_t j = 0; j < nn.ws[i].rows; j++) {
             for (size_t k = 0; k < nn.ws[i].cols; k++) {
                 MAT_AT(nn.ws[i], j, k) -= rate*MAT_AT(g.ws[i], j, k);
@@ -641,12 +641,12 @@ void nn_learn(NN nn, NN g, float rate) {
 }
 
 void nn_zero(NN nn) {
-    for (size_t i = 0; i < nn.count; i++) {
+    for (size_t i = 0; i < nn.arch_count-1; i++) {
         mat_fill(nn.ws[i], 0);
         mat_fill(nn.bs[i], 0);
         mat_fill(nn.as[i], 0);
     }
-    mat_fill(nn.as[nn.count], 0);
+    mat_fill(nn.as[nn.arch_count-1], 0);
 }
 
 // batch size, t training data, rate, epoch, costs
@@ -792,7 +792,7 @@ void gym_nn_render(NN nn, LayoutRect r)
     size_t nn_x = r.w - 2*BORDER_HPAD;
     size_t nn_y = r.h - 2*BORDER_VPAD;
 
-    size_t no_of_layers = nn.count + 1;
+    size_t no_of_layers = nn.arch_count;
     int hpad = nn_x/no_of_layers;
     
     for (size_t i = 0; i < no_of_layers; i++) {
@@ -829,15 +829,15 @@ void gym_heatmap_render(NN nn, LayoutRect r, HeatmapKind kind)
     size_t no_of_spacing;
     switch (kind) {
     case WEIGHT:
-        no_of_spacing = nn.count - 1;
-        for (size_t i = 0; i < nn.count; ++i) {
+        no_of_spacing = nn.arch_count - 2;
+        for (size_t i = 0; i < nn.arch_count-1; ++i) {
             if (max_cols < nn.ws[i].cols) max_cols += nn.ws[i].cols;
             total_rows += nn.ws[i].rows;
         }
         break;
     case ACT:
-        no_of_spacing = nn.count;
-        for (size_t i = 0; i < nn.count+1; ++i) {
+        no_of_spacing = nn.arch_count-1;
+        for (size_t i = 0; i < nn.arch_count; ++i) {
             if (max_cols < nn.as[i].cols) max_cols += nn.as[i].cols;
             total_rows += nn.as[i].rows;
         }
@@ -858,7 +858,7 @@ void gym_heatmap_render(NN nn, LayoutRect r, HeatmapKind kind)
 
     switch (kind) {
     case WEIGHT:
-        for (size_t i = 0; i < nn.count; i++) {
+        for (size_t i = 0; i < nn.arch_count-1; i++) {
             for (size_t j = 0; j < nn.ws[i].rows; j++) {
                 size_t no_of_cols = nn.ws[i].cols;
                 size_t cntrx = r.w/2-no_of_cols*cell_width/2;
@@ -876,7 +876,7 @@ void gym_heatmap_render(NN nn, LayoutRect r, HeatmapKind kind)
         DrawText(buffer, r.x+(r.w/2-tw/2), r.y+r.h, font_size, RAYWHITE);
         break;
     case ACT:
-        for (size_t i = 0; i < nn.count+1; i++) {
+        for (size_t i = 0; i < nn.arch_count; i++) {
             for (size_t j = 0; j < nn.as[i].rows; j++) {
                 size_t no_of_cols = nn.as[i].cols;
                 size_t cntrx = r.w/2-no_of_cols*cell_width/2;
